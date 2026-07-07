@@ -268,17 +268,23 @@
 
         /* 模擬/開發登入面板 */
         .mock-login-panel {
-            background: rgba(30, 41, 59, 0.9);
+            background: rgba(30, 41, 59, 0.95);
             border: 2px dashed var(--primary);
             border-radius: var(--card-radius);
             padding: 20px;
-            margin-top: 30px;
-            width: 100%;
-            max-width: 500px;
+            width: 90%;
+            max-width: 450px;
             display: flex;
             flex-direction: column;
             gap: 12px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            /* 浮動在最上層，不受鎖定遮罩影響 */
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3000;
+            backdrop-filter: blur(10px);
         }
 
         .mock-title {
