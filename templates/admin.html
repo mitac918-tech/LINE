@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理員設定後台</title>
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --success: #10b981;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --card-radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #f472b6, #fb7185);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .back-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(-3px);
+        }
+
+        /* 網格版面 */
+        .admin-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 24px;
+        }
+
+        /* 卡片樣式 */
+        .card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            padding: 24px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .card-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            border-left: 4px solid var(--primary);
+            padding-left: 10px;
+        }
+
+        /* 表單元素 */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        input[type="text"], select {
+            flex: 1;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus, select:focus {
+            border-color: var(--primary);
+        }
+
+        .btn-add {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.9rem;
+            white-space: nowrap;
+        }
+
+        .btn-add:hover {
+            background: var(--primary-hover);
+        }
+
+        /* 列表展示 */
+        .list-container {
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.4);
+            padding: 8px;
+        }
+
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+
+        .list-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .list-item-text {
+            color: #e2e8f0;
+        }
+
+        .list-item-subtext {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+
+        .btn-delete {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+
+        .btn-delete:hover {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+        }
+
+        /* 載入中動畫遮罩 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            z-index: 2000;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(99, 102, 241, 0.1);
+            border-left-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 載入與驗證遮罩 -->
+    <div id="loading" class="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-message" class="loading-text">正在驗證管理員身份...</div>
+    </div>
+
+    <div class="container">
+        <header>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <h1>⚙️ 管理員設定後台</h1>
+                <p style="font-size: 0.8rem; color: var(--text-secondary);">動態配置施工進度表所需之基礎資料結構</p>
+            </div>
+            <a href="/" id="back-home-link" class="back-btn">← 返回施工進度表</a>
+        </header>
+
+        <div class="admin-grid">
+            
+            <!-- 1. 棟別管理 -->
+            <div class="card">
+                <div class="card-title">棟別管理</div>
+                <div class="form-group">
+                    <label>新增棟別</label>
+                    <div class="form-row">
+                        <input type="text" id="new-block-name" placeholder="輸入棟別 (例如: C棟)">
+                        <button class="btn-add" onclick="addBlock()">新增</button>
+                    </div>
+                </div>
+                <label>目前現有棟別</label>
+                <div id="blocks-list" class="list-container">
+                    <!-- 動態生成 -->
+                </div>
+            </div>
+
+            <!-- 2. 樓層管理 -->
+            <div class="card">
+                <div class="card-title">樓層管理</div>
+                <div class="form-group">
+                    <label>新增樓層</label>
+                    <div class="form-row">
+                        <input type="text" id="new-floor-name" placeholder="輸入樓層 (例如: 6F)">
+                        <button class="btn-add" onclick="addFloor()">新增</button>
+                    </div>
+                </div>
+                <label>目前現有樓層</label>
+                <div id="floors-list" class="list-container">
+                    <!-- 動態生成 -->
+                </div>
+            </div>
+
+            <!-- 3. 工項與分類管理 -->
+            <div class="card" style="grid-column: span 1;">
+                <div class="card-title">施工項目與分類管理</div>
+                <div class="form-group">
+                    <label>新增工項</label>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <input type="text" id="new-item-category" placeholder="工種分類 (例如: 泥作、水電)">
+                        <div class="form-row">
+                            <input type="text" id="new-item-name" placeholder="工項名稱 (例如: 天花板粗胚)">
+                            <button class="btn-add" onclick="addWorkItem()">新增</button>
+                        </div>
+                    </div>
+                </div>
+                <label>目前現有工項</label>
+                <div id="items-list" class="list-container">
+                    <!-- 動態生成 -->
+                </div>
+            </div>
+
+            <!-- 4. 管理員名單管理 -->
+            <div class="card">
+                <div class="card-title">管理員權限名單 (LINE User ID)</div>
+                <div class="form-group">
+                    <label>新增管理員</label>
+                    <div class="form-row">
+                        <input type="text" id="new-admin-id" placeholder="輸入 LINE User ID">
+                        <button class="btn-add" onclick="addAdmin()">加入</button>
+                    </div>
+                </div>
+                <label>管理員名單</label>
+                <div id="admins-list" class="list-container">
+                    <!-- 動態生成 -->
+                </div>
+            </div>
+
+            <!-- 5. 授權使用者名單管理 (白名單) -->
+            <div class="card">
+                <div class="card-title">授權使用者名單 (白名單)</div>
+                <div class="form-group">
+                    <label>新增授權使用者</label>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <input type="text" id="new-allowed-id" placeholder="輸入 LINE User ID">
+                        <div class="form-row">
+                            <input type="text" id="new-allowed-name" placeholder="輸入姓名 (例如: 王工程師)">
+                            <button class="btn-add" onclick="addAllowedUser()">新增</button>
+                        </div>
+                    </div>
+                </div>
+                <label>目前已授權名單</label>
+                <div id="allowed-users-list" class="list-container">
+                    <!-- 動態生成 -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // 從 URL 解析 userId 參數
+        const urlParams = new URLSearchParams(window.location.search);
+        const adminUserId = urlParams.get('userId');
+
+        // 全域快取配置資料
+        let configData = {
+            blocks: [],
+            floors: [],
+            work_items: [],
+            admins: [],
+            allowed_users: []
+        };
+
+        // 頁面加載時先進行權限檢查
+        document.addEventListener("DOMContentLoaded", function() {
+            // 設定「返回首頁」的連結也帶上 userId，避免返回時身分丟失
+            if (adminUserId) {
+                document.getElementById("back-home-link").href = `/?userId=${encodeURIComponent(adminUserId)}`;
+            }
+
+            if (!adminUserId) {
+                authFailed("錯誤：未偵測到您的 LINE User ID，拒絕存取後台。");
+                return;
+            }
+
+            // 呼叫後端 API 驗證是否為管理員
+            fetch(`/api/is_admin?userId=${encodeURIComponent(adminUserId)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.is_admin) {
+                        // 權限通過，載入後台配置資料
+                        loadConfigData();
+                    } else {
+                        authFailed("權限不足：您並非系統登記的管理員，無法進入後台。");
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    authFailed("網路或系統錯誤，無法驗證權限。");
+                });
+        });
+
+        function authFailed(message) {
+            document.getElementById("loading-message").innerText = message;
+            document.getElementById("loading-message").style.color = "var(--danger)";
+            // 隱藏 spinner
+            document.querySelector(".spinner").style.display = "none";
+            
+            // 3秒後自動彈回首頁
+            setTimeout(() => {
+                window.location.href = "/";
+            }, 3000);
+        }
+
+        // =====================================================================
+        // API 讀取邏輯
+        // =====================================================================
+        function loadConfigData() {
+            document.getElementById("loading").style.display = "flex";
+            
+            fetch(`/api/admin/config?userId=${encodeURIComponent(adminUserId)}`)
+                .then(res => {
+                    if (!res.ok) throw new Error("讀取後台設定失敗");
+                    return res.json();
+                })
+                .then(data => {
+                    configData = data;
+                    renderAllLists();
+                    document.getElementById("loading").style.display = "none";
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("無法載入配置資料");
+                    document.getElementById("loading").style.display = "none";
+                });
+        }
+
+        // =====================================================================
+        // UI 渲染列表
+        // =====================================================================
+        function renderAllLists() {
+            renderBlocks();
+            renderFloors();
+            renderWorkItems();
+            renderAdmins();
+            renderAllowedUsers();
+        }
+
+        // 渲染棟別
+        function renderBlocks() {
+            const container = document.getElementById("blocks-list");
+            container.innerHTML = "";
+            if (configData.blocks.length === 0) {
+                container.innerHTML = "<div style='color: var(--text-secondary); padding: 8px;'>暫無資料</div>";
+                return;
+            }
+            configData.blocks.forEach(b => {
+                const item = document.createElement("div");
+                item.className = "list-item";
+                item.innerHTML = `
+                    <span class="list-item-text">${b.name}</span>
+                    <button class="btn-delete" onclick="deleteBlock(${b.id}, '${b.name}')">🗑 刪除</button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // 渲染樓層
+        function renderFloors() {
+            const container = document.getElementById("floors-list");
+            container.innerHTML = "";
+            if (configData.floors.length === 0) {
+                container.innerHTML = "<div style='color: var(--text-secondary); padding: 8px;'>暫無資料</div>";
+                return;
+            }
+            // 依自然順序顯示即可，無須強行排序，方便管理員查看新增順序
+            configData.floors.forEach(f => {
+                const item = document.createElement("div");
+                item.className = "list-item";
+                item.innerHTML = `
+                    <span class="list-item-text">${f.name}</span>
+                    <button class="btn-delete" onclick="deleteFloor(${f.id}, '${f.name}')">🗑 刪除</button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // 渲染工項
+        function renderWorkItems() {
+            const container = document.getElementById("items-list");
+            container.innerHTML = "";
+            if (configData.work_items.length === 0) {
+                container.innerHTML = "<div style='color: var(--text-secondary); padding: 8px;'>暫無資料</div>";
+                return;
+            }
+            configData.work_items.forEach(item => {
+                const div = document.createElement("div");
+                div.className = "list-item";
+                div.innerHTML = `
+                    <div>
+                        <span class="list-item-subtext" style="background: rgba(99,102,241,0.2); padding: 2px 6px; border-radius: 4px; color: #a5b4fc; font-size: 0.75rem; margin-left: 0; margin-right: 8px;">${item.category}</span>
+                        <span class="list-item-text">${item.name}</span>
+                    </div>
+                    <button class="btn-delete" onclick="deleteWorkItem(${item.id}, '${item.category}-${item.name}')">🗑 刪除</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // 渲染管理員
+        function renderAdmins() {
+            const container = document.getElementById("admins-list");
+            container.innerHTML = "";
+            configData.admins.forEach(a => {
+                const item = document.createElement("div");
+                item.className = "list-item";
+                // 若為自己，隱藏刪除按鈕
+                const isSelf = a.line_user_id === adminUserId;
+                item.innerHTML = `
+                    <span class="list-item-text" style="font-family: monospace; font-size: 0.85rem;">${a.line_user_id} ${isSelf ? '<small style="color: var(--success)">(您自己)</small>' : ''}</span>
+                    ${isSelf ? '' : `<button class="btn-delete" onclick="deleteAdmin(${a.id}, '${a.line_user_id}')">🗑 移除</button>`}
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // 渲染授權使用者 (白名單)
+        function renderAllowedUsers() {
+            const container = document.getElementById("allowed-users-list");
+            container.innerHTML = "";
+            if (!configData.allowed_users || configData.allowed_users.length === 0) {
+                container.innerHTML = "<div style='color: var(--text-secondary); padding: 8px;'>暫無資料</div>";
+                return;
+            }
+            configData.allowed_users.forEach(u => {
+                const item = document.createElement("div");
+                item.className = "list-item";
+                item.innerHTML = `
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="list-item-text" style="font-weight: 600;">${u.name}</span>
+                        <span class="list-item-subtext" style="font-family: monospace; font-size: 0.75rem; margin-left: 0;">ID: ${u.line_user_id}</span>
+                    </div>
+                    <button class="btn-delete" onclick="deleteAllowedUser(${u.id}, '${u.name}')">🗑 移除</button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // =====================================================================
+        // 增刪控制 API 串接
+        // =====================================================================
+        function postAdminAction(endpoint, payload, successCallback) {
+            document.getElementById("loading").style.display = "flex";
+            // 在 payload 中加入操作者的 userId
+            payload.userId = adminUserId;
+            
+            fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(res => {
+                if (res.success) {
+                    successCallback();
+                    loadConfigData(); // 重新整理列表
+                } else {
+                    alert("執行失敗：" + (res.error || "未知錯誤"));
+                    document.getElementById("loading").style.display = "none";
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert("網路或系統錯誤，操作失敗");
+                document.getElementById("loading").style.display = "none";
+            });
+        }
+
+        // 棟別
+        function addBlock() {
+            const input = document.getElementById("new-block-name");
+            const name = input.value.trim();
+            if (!name) return;
+            postAdminAction("/api/admin/add_block", { name }, () => {
+                input.value = "";
+            });
+        }
+        function deleteBlock(id, name) {
+            if (!confirm(`警告：刪除棟別「${name}」將會永久刪除該棟別下的所有施工進度，此操作不可逆！是否確認刪除？`)) return;
+            postAdminAction("/api/admin/delete_block", { id }, () => {});
+        }
+
+        // 樓層
+        function addFloor() {
+            const input = document.getElementById("new-floor-name");
+            const name = input.value.trim();
+            if (!name) return;
+            postAdminAction("/api/admin/add_floor", { name }, () => {
+                input.value = "";
+            });
+        }
+        function deleteFloor(id, name) {
+            if (!confirm(`警告：刪除樓層「${name}」將同步刪除所有棟別在該樓層的施工進度，是否確認刪除？`)) return;
+            postAdminAction("/api/admin/delete_floor", { id }, () => {});
+        }
+
+        // 工項
+        function addWorkItem() {
+            const catInput = document.getElementById("new-item-category");
+            const nameInput = document.getElementById("new-item-name");
+            const category = catInput.value.trim();
+            const name = nameInput.value.trim();
+            if (!category || !name) {
+                alert("請填寫完整的工種分類與工項名稱");
+                return;
+            }
+            postAdminAction("/api/admin/add_work_item", { category, name }, () => {
+                nameInput.value = ""; // 保留工種分類方便連續新增，僅清空工項名稱
+            });
+        }
+        function deleteWorkItem(id, name) {
+            if (!confirm(`警告：刪除工項「${name}」將同步刪除所有樓層在該工項的施工進度，是否確認刪除？`)) return;
+            postAdminAction("/api/admin/delete_work_item", { id }, () => {});
+        }
+
+        // 管理員
+        function addAdmin() {
+            const input = document.getElementById("new-admin-id");
+            const line_user_id = input.value.trim();
+            if (!line_user_id) return;
+            postAdminAction("/api/admin/add_admin", { line_user_id }, () => {
+                input.value = "";
+            });
+        }
+        function deleteAdmin(id, line_user_id) {
+            if (!confirm(`確認將「${line_user_id}」從管理員名單中移除嗎？`)) return;
+            postAdminAction("/api/admin/delete_admin", { id }, () => {});
+        }
+
+        // 授權工程師 (白名單)
+        function addAllowedUser() {
+            const idInput = document.getElementById("new-allowed-id");
+            const nameInput = document.getElementById("new-allowed-name");
+            const line_user_id = idInput.value.trim();
+            const name = nameInput.value.trim();
+            if (!line_user_id || !name) {
+                alert("請填寫完整的 LINE User ID 與工程師姓名");
+                return;
+            }
+            postAdminAction("/api/admin/add_allowed_user", { line_user_id, name }, () => {
+                idInput.value = "";
+                nameInput.value = "";
+            });
+        }
+        function deleteAllowedUser(id, name) {
+            if (!confirm(`確認取消「${name}」的使用授權嗎？\n移除後他將無法登入或修改任何施工進度。`)) return;
+            postAdminAction("/api/admin/delete_allowed_user", { id }, () => {});
+        }
+    </script>
+</body>
+</html>
