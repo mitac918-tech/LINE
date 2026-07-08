@@ -1059,6 +1059,7 @@
             
             const blockSelect = document.getElementById("block-select");
             const blockName = blockSelect.options[blockSelect.selectedIndex].text;
+            const currentBlockId = blockSelect.value;
             
             // 1. 取得樓層並排序
             const sortedFloors = sortFloors([...appData.floors]);
