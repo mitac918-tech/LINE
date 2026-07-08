@@ -634,19 +634,30 @@
         });
 
         function initLIFF() {
+            const isDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
             if (typeof liff === 'undefined') {
-                console.log("LINE LIFF SDK 未載入，進入開發模擬模式");
-                fallbackToMock();
+                console.log("LINE LIFF SDK 未載入");
+                if (isDev) {
+                    fallbackToMock();
+                } else {
+                    document.getElementById("loading").innerHTML = "<div style='color: var(--danger); font-weight: 600; padding: 20px; text-align: center;'>系統錯誤：無法載入 LINE 登入 SDK，請在行動裝置的 LINE App 中重新開啟。</div>";
+                }
                 return;
             }
 
             let liffInitialized = false;
 
-            // 設定 1.5 秒超時，若 LIFF 初始化在此時間內無任何回應，強制降級進入模擬開發面板
+            // 設定 1.5 秒超時
             const timeoutId = setTimeout(() => {
                 if (!liffInitialized) {
-                    console.log("LIFF 初始化超時 (1.5秒無回應)，自動進入開發模擬模式");
-                    fallbackToMock();
+                    console.log("LIFF 初始化超時");
+                    if (isDev) {
+                        fallbackToMock();
+                    } else {
+                        // 在線上環境，初始化超時則嘗試強制跳轉至 LINE 登入頁面
+                        liff.login();
+                    }
                 }
             }, 1500);
 
@@ -657,7 +668,7 @@
             }
 
             try {
-                // 請替換為您真實的 LIFF ID (例如: '2000123456-AbcdEfgh')
+                // 請替換為您真實的 LIFF ID
                 liff.init({ liffId: '2010633327-s7bAAMPG' }) 
                     .then(() => {
                         liffInitialized = true;
@@ -675,28 +686,40 @@
                                 checkAdminAndLoadData();
                             }).catch(err => {
                                 console.error('LIFF getProfile failed', err);
-                                updateUserUI();
-                                checkAdminAndLoadData();
+                                if (isDev) {
+                                    updateUserUI();
+                                    checkAdminAndLoadData();
+                                } else {
+                                    liff.login();
+                                }
                             });
                         } else {
-                            if (liff.isInClient()) {
-                                liff.login();
-                            } else {
+                            if (isDev) {
                                 fallbackToMock();
+                            } else {
+                                liff.login();
                             }
                         }
                     })
                     .catch(err => {
                         liffInitialized = true;
                         clearTimeout(timeoutId);
-                        console.log("LIFF 載入失敗 (可能為本機開發非 LINE 環境):", err);
-                        fallbackToMock();
+                        console.log("LIFF 載入失敗:", err);
+                        if (isDev) {
+                            fallbackToMock();
+                        } else {
+                            document.getElementById("loading").innerHTML = `<div style='color: var(--danger); font-weight: 600; padding: 20px; text-align: center;'>LINE 登入驗證錯誤，請在行動裝置 LINE 中打開。</div>`;
+                        }
                     });
             } catch (e) {
                 liffInitialized = true;
                 clearTimeout(timeoutId);
                 console.error("LIFF 初始化執行異常:", e);
-                fallbackToMock();
+                if (isDev) {
+                    fallbackToMock();
+                } else {
+                    document.getElementById("loading").innerHTML = "<div style='color: var(--danger); font-weight: 600; padding: 20px; text-align: center;'>系統異常，請重新整理網頁。</div>";
+                }
             }
         }
 
