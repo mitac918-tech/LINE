@@ -492,11 +492,14 @@
             </div>
 
             <!-- 棟別切換 -->
-            <div class="block-selector">
+            <div class="block-selector" style="display: flex; align-items: center; gap: 10px;">
                 <label for="block-select">當前棟別：</label>
                 <select id="block-select">
                     <!-- 動態渲染棟別 -->
                 </select>
+                <button id="btn-download-csv" type="button" style="background: var(--success); border: none; color: white; padding: 10px 16px; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15); height: 42px;">
+                    <span>📥 下載進度報表</span>
+                </button>
             </div>
         </div>
 
@@ -623,6 +626,9 @@
                     alert("複製失敗，請手動選取複製！您的 ID 為：" + userId);
                 });
             };
+
+            // 綁定下載 CSV 按鈕
+            document.getElementById("btn-download-csv").onclick = downloadCSV;
 
             initLIFF();
         });
@@ -1015,6 +1021,85 @@
                 alert('網路錯誤，無法變更狀態。');
             });
         };
+
+        function downloadCSV() {
+            if (!appData || !appData.blocks || !appData.floors || !appData.work_items) {
+                alert("資料未載入，無法下載！");
+                return;
+            }
+            
+            const blockSelect = document.getElementById("block-select");
+            const blockName = blockSelect.options[blockSelect.selectedIndex].text;
+            
+            // 1. 取得樓層並排序
+            const sortedFloors = sortFloors([...appData.floors]);
+            
+            // 2. 取得分類並群組工項
+            const categories = {};
+            appData.work_items.forEach(item => {
+                if (!categories[item.category]) {
+                    categories[item.category] = [];
+                }
+                categories[item.category].push(item);
+            });
+            
+            // 3. 建立 CSV 標頭
+            let csvRows = [];
+            
+            // 第一行：樓層, 工種1, 工種1, 工種2...
+            let row1 = ["樓層"];
+            Object.keys(categories).forEach(cat => {
+                categories[cat].forEach(() => {
+                    row1.push(cat);
+                });
+            });
+            csvRows.push(row1.map(val => `"${val.replace(/"/g, '""')}"`).join(","));
+            
+            // 第二行：, 工項1-1, 工項1-2, 工項2-1...
+            let row2 = [""];
+            Object.keys(categories).forEach(cat => {
+                categories[cat].forEach(item => {
+                    row2.push(item.name);
+                });
+            });
+            csvRows.push(row2.map(val => `"${val.replace(/"/g, '""')}"`).join(","));
+            
+            // 4. 建立每層樓的進度資料
+            sortedFloors.forEach(floor => {
+                let row = [floor.name];
+                Object.keys(categories).forEach(cat => {
+                    categories[cat].forEach(item => {
+                        const progressKey = `${currentBlockId}_${floor.id}_${item.id}`;
+                        const progressInfo = appData.progress[progressKey];
+                        const isCompleted = progressInfo && progressInfo.status === 1;
+                        
+                        if (isCompleted) {
+                            const updater = progressInfo.updated_by || '工程師';
+                            const updateTime = progressInfo.updated_at || '';
+                            row.push(`已完成 (${updater} ${updateTime})`);
+                        } else {
+                            row.push("未完成");
+                        }
+                    });
+                });
+                csvRows.push(row.map(val => `"${val.replace(/"/g, '""')}"`).join(","));
+            });
+            
+            // 5. 結合為 CSV 字串並加入 UTF-8 BOM 防止 Excel 亂碼
+            const csvContent = csvRows.join("\n");
+            const bom = "\uFEFF";
+            const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+            
+            // 6. 觸發瀏覽器下載
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `${blockName}_施工進度報表.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     </script>
 </body>
 </html>
