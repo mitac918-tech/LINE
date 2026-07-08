@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINE 登入互動式進度表</title>
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- 引入 LINE LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.3);
+            --danger: #ef4444;
+            --card-radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* 頂部毛玻璃容器 */
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #a5b4fc, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 4px 20px rgba(99, 102, 241, 0.1);
+        }
+
+        /* 控制面板卡片 */
+        .control-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid var(--primary);
+            object-fit: cover;
+            background-color: #334155;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .user-id-badge {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .block-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        select {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            outline: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+        }
+
+        .admin-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, #4338ca 100%);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-decoration: none;
+            box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.4);
+        }
+
+        .admin-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px 0 rgba(99, 102, 241, 0.6);
+        }
+
+        /* 響應式 Excel 表格包裝器 */
+        .table-container {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            padding: 24px;
+            overflow-x: auto;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 4px; /* 單元格間距，像精緻的網格 */
+            min-width: 800px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: center;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        /* 表頭樣式 */
+        th {
+            background: rgba(15, 23, 42, 0.5);
+            font-weight: 600;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .category-header {
+            background: rgba(99, 102, 241, 0.15);
+            color: #c7d2fe;
+            font-size: 0.9rem;
+            border-bottom: 2px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .floor-col {
+            background: rgba(15, 23, 42, 0.6) !important;
+            font-weight: 700;
+            color: var(--text-primary);
+            width: 80px;
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            border: 1px solid var(--glass-border);
+        }
+
+        /* 進度格子狀態 */
+        .cell-progress {
+            cursor: pointer;
+            min-width: 100px;
+            font-size: 0.8rem;
+            position: relative;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            text-align: center;
+            vertical-align: middle;
+            height: 52px;
+        }
+
+        .cell-progress:hover {
+            transform: scale(1.03);
+            z-index: 5;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* 已完成狀態 */
+        .cell-completed {
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+            border-color: #34d399 !important;
+            color: white !important;
+            box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.2), 0 0 15px var(--success-glow);
+        }
+
+        .cell-status-text {
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+
+        .cell-updater {
+            font-size: 0.65rem;
+            opacity: 0.9;
+            max-width: 90px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 模擬/開發登入面板 */
+        .mock-login-panel {
+            background: rgba(30, 41, 59, 0.95);
+            border: 2px dashed var(--primary);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            width: 90%;
+            max-width: 450px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            /* 浮動在最上層，不受鎖定遮罩影響 */
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3000;
+            backdrop-filter: blur(10px);
+        }
+
+        .mock-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #a5b4fc;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .mock-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .mock-input {
+            flex: 1;
+            background: #0f172a;
+            border: 1px solid var(--glass-border);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        .mock-btn {
+            background: var(--primary);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .mock-btn:hover {
+            background: var(--primary-hover);
+        }
+
+        /* 彈出確認 Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-card {
+            background: #1e293b;
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            padding: 28px;
+            width: 90%;
+            max-width: 450px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal-card {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .modal-body strong {
+            color: var(--text-primary);
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .btn-cancel {
+            background: transparent;
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+        }
+
+        .btn-confirm {
+            background: var(--success);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: 0 4px 12px var(--success-glow);
+        }
+
+        .btn-confirm:hover {
+            background: #059669;
+        }
+
+        /* 載入動畫遮罩 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            z-index: 2000;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(99, 102, 241, 0.1);
+            border-left-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 載入中動畫 -->
+    <div id="loading" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">正在讀取 LINE 登入狀態及進度表...</div>
+    </div>
+
+    <!-- 鎖定安全畫面 (未授權白名單) -->
+    <div id="unauthorized-lock" class="loading-overlay" style="display: none; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);">
+        <div style="font-size: 4rem; margin-bottom: 10px;">🔒</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">系統尚未取得授權</div>
+        <div style="color: var(--text-secondary); max-width: 320px; text-align: center; font-size: 0.9rem; line-height: 1.6; margin-bottom: 24px; padding: 0 20px;">
+            您的 LINE 帳號不在目前的授權名單中。請將下方您的 LINE ID 複製並傳給管理員以開通權限。
+        </div>
+        <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px 20px; font-family: monospace; font-size: 0.85rem; color: #a5b4fc; display: flex; align-items: center; gap: 10px; margin-bottom: 24px; max-width: 350px; width: 90%;">
+            <span id="lock-user-id" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">User ID: Guest</span>
+            <button id="btn-copy-id" style="background: var(--primary); border: none; color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; font-weight: 600; font-family: inherit; transition: background 0.2s;">複製</button>
+        </div>
+        <div id="copy-toast" style="color: var(--success); font-size: 0.8rem; font-weight: 600; opacity: 0; transition: opacity 0.3s; margin-top: -10px; margin-bottom: 15px;">✓ 已成功複製 ID</div>
+        <button onclick="location.reload()" style="background: transparent; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s;">重新載入頁面</button>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>LINE 互動式施工進度表</h1>
+            <!-- 管理員後台按鈕（預設隱藏） -->
+            <a href="/admin" id="admin-btn" class="admin-btn" style="display: none;">
+                <span>⚙️ 管理員設定後台</span>
+            </a>
+        </header>
+
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <!-- 使用者狀態 -->
+            <div class="user-info">
+                <img id="user-avatar" class="avatar" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>" alt="頭像">
+                <div class="user-details">
+                    <span id="user-name-span" class="user-name">訪客登入</span>
+                    <span id="user-id-badge" class="user-id-badge">User ID: Guest</span>
+                </div>
+            </div>
+
+            <!-- 棟別切換 -->
+            <div class="block-selector" style="display: flex; align-items: center; gap: 10px;">
+                <label for="block-select">當前棟別：</label>
+                <select id="block-select">
+                    <!-- 動態渲染棟別 -->
+                </select>
+                <button id="btn-download-csv" type="button" style="background: var(--success); border: none; color: white; padding: 10px 16px; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15); height: 42px;">
+                    <span>📥 下載進度報表</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 進度網格表格 -->
+        <div class="table-container">
+            <table id="progress-table">
+                <!-- 動態建構表格 -->
+            </table>
+        </div>
+
+        <!-- 開發模擬登入面板（僅在非 LINE/LIFF 環境下顯示，便於本地開發測試） -->
+        <div id="mock-login" class="mock-login-panel" style="display: none;">
+            <div class="mock-title">
+                <span>💻 偵測到非 LINE 環境 (開發模擬登入)</span>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary);">
+                您可以輸入管理員 User ID 測試後台，或一般 ID 測試工程師畫面。
+            </p>
+            <div class="mock-row">
+                <input id="mock-id-input" class="mock-input" type="text" placeholder="輸入 LINE User ID (例如: admin_test_123)" value="admin_test_123">
+                <input id="mock-name-input" class="mock-input" type="text" placeholder="輸入暱稱" value="測試管理員">
+            </div>
+            <button id="mock-login-btn" class="mock-btn" type="button">模擬登入</button>
+        </div>
+    </div>
+
+    <!-- 彈出確認 Modal -->
+    <div id="confirm-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header" id="modal-title">更新進度確認</div>
+            <div class="modal-body" id="modal-body">
+                確認變更此工項的狀態嗎？
+            </div>
+            <div class="modal-footer">
+                <button id="btn-modal-cancel" class="btn-cancel">取消</button>
+                <button id="btn-modal-confirm" class="btn-confirm">確定變更</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // 全域錯誤監聽器（遠端偵錯用，協助找出造成網頁卡死/執行失敗的 JS 錯誤）
+        // =====================================================================
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errDetails = `錯誤訊息: ${message}\n來源: ${source}\n行號: ${lineno}:${colno}\n錯誤堆疊: ${error ? error.stack : '無'}`;
+            console.error(errDetails);
+            alert("偵測到網頁執行階段錯誤：\n\n" + errDetails);
+            // 嘗試隱藏載入遮罩
+            const loader = document.getElementById("loading");
+            if (loader) loader.style.display = "none";
+            return false;
+        };
+
+        window.onunhandledrejection = function(event) {
+            const reason = event.reason;
+            const errDetails = `未處理的 Promise 拒絕: ${reason && reason.stack ? reason.stack : reason}`;
+            console.error(errDetails);
+            alert("偵測到未處理的 Promise 拒絕：\n\n" + errDetails);
+            const loader = document.getElementById("loading");
+            if (loader) loader.style.display = "none";
+        };
+
+        // LIFF 初始化與使用者狀態
+        let currentUser = {
+            userId: 'guest_user_id',
+            displayName: '訪客工程師'
+        };
+        let isLiffContext = false;
+        
+        // 全域快取資料
+        let appData = {
+            blocks: [],
+            floors: [],
+            work_items: [],
+            progress: {}
+        };
+
+        // 樓層排序規則：RF -> 5F -> 1F -> B1 -> B2 ... (依建築邏輯從高至低排列)
+        function sortFloors(floors) {
+            return floors.sort((a, b) => {
+                const parseFloor = (name) => {
+                    if (!name) return 0;
+                    name = String(name).toUpperCase();
+                    if (name === 'RF') return 999;
+                    if (name.startsWith('B')) {
+                        const num = parseInt(name.substring(1));
+                        return isNaN(num) ? -100 : -num;
+                    }
+                    if (name.endsWith('F')) {
+                        const num = parseInt(name.slice(0, -1));
+                        return isNaN(num) ? 0 : num;
+                    }
+                    const num = parseInt(name);
+                    return isNaN(num) ? 0 : num;
+                };
+                return parseFloor(b.name) - parseFloor(a.name);
+            });
+        }
+
+        // =====================================================================
+        // LIFF 與身分載入邏輯
+        // =====================================================================
+        document.addEventListener("DOMContentLoaded", function() {
+            // 先嘗試從本地 localStorage 取得可能留存的模擬登入資訊
+            const cachedId = localStorage.getItem('mock_user_id');
+            const cachedName = localStorage.getItem('mock_user_name');
+            if (cachedId) {
+                currentUser.userId = cachedId;
+                currentUser.displayName = cachedName || '模擬使用者';
+            }
+
+            // 綁定複製 ID 按鈕
+            document.getElementById("btn-copy-id").onclick = function() {
+                const userId = document.getElementById("lock-user-id").innerText;
+                navigator.clipboard.writeText(userId).then(() => {
+                    const toast = document.getElementById("copy-toast");
+                    toast.style.opacity = "1";
+                    setTimeout(() => {
+                        toast.style.opacity = "0";
+                    }, 2000);
+                }).catch(err => {
+                    console.error("無法複製 ID", err);
+                    alert("複製失敗，請手動選取複製！您的 ID 為：" + userId);
+                });
+            };
+
+            // 綁定下載 CSV 按鈕
+            document.getElementById("btn-download-csv").onclick = downloadCSV;
+
+            initLIFF();
+        });
+
+        function initLIFF() {
+            if (typeof liff === 'undefined') {
+                console.log("LINE LIFF SDK 未載入，進入開發模擬模式");
+                fallbackToMock();
+                return;
+            }
+
+            let liffInitialized = false;
+
+            // 設定 1.5 秒超時，若 LIFF 初始化在此時間內無任何回應，強制降級進入模擬開發面板
+            const timeoutId = setTimeout(() => {
+                if (!liffInitialized) {
+                    console.log("LIFF 初始化超時 (1.5秒無回應)，自動進入開發模擬模式");
+                    fallbackToMock();
+                }
+            }, 1500);
+
+            function fallbackToMock() {
+                showMockLoginPanel();
+                updateUserUI();
+                checkAdminAndLoadData();
+            }
+
+            try {
+                // 請替換為您真實的 LIFF ID (例如: '2000123456-AbcdEfgh')
+                liff.init({ liffId: '2010633327-s7bAAMPG' }) 
+                    .then(() => {
+                        liffInitialized = true;
+                        clearTimeout(timeoutId);
+                        
+                        if (liff.isLoggedIn()) {
+                            isLiffContext = true;
+                            liff.getProfile().then(profile => {
+                                currentUser.userId = profile.userId;
+                                currentUser.displayName = profile.displayName;
+                                if (profile.pictureUrl) {
+                                    document.getElementById("user-avatar").src = profile.pictureUrl;
+                                }
+                                updateUserUI();
+                                checkAdminAndLoadData();
+                            }).catch(err => {
+                                console.error('LIFF getProfile failed', err);
+                                updateUserUI();
+                                checkAdminAndLoadData();
+                            });
+                        } else {
+                            if (liff.isInClient()) {
+                                liff.login();
+                            } else {
+                                fallbackToMock();
+                            }
+                        }
+                    })
+                    .catch(err => {
+                        liffInitialized = true;
+                        clearTimeout(timeoutId);
+                        console.log("LIFF 載入失敗 (可能為本機開發非 LINE 環境):", err);
+                        fallbackToMock();
+                    });
+            } catch (e) {
+                liffInitialized = true;
+                clearTimeout(timeoutId);
+                console.error("LIFF 初始化執行異常:", e);
+                fallbackToMock();
+            }
+        }
+
+        function showMockLoginPanel() {
+            document.getElementById("mock-login").style.display = "flex";
+            
+            // 綁定模擬登入按鈕
+            document.getElementById("mock-login-btn").onclick = function() {
+                const idInput = document.getElementById("mock-id-input").value.strip ? document.getElementById("mock-id-input").value.strip() : document.getElementById("mock-id-input").value.trim();
+                const nameInput = document.getElementById("mock-name-input").value.strip ? document.getElementById("mock-name-input").value.strip() : document.getElementById("mock-name-input").value.trim();
+                
+                if (!idInput) {
+                    alert('User ID 不能為空');
+                    return;
+                }
+                
+                currentUser.userId = idInput;
+                currentUser.displayName = nameInput || '模擬工程師';
+                
+                // 儲存於 LocalStorage 便於重新整理
+                localStorage.setItem('mock_user_id', currentUser.userId);
+                localStorage.setItem('mock_user_name', currentUser.displayName);
+                
+                updateUserUI();
+                checkAdminAndLoadData();
+            };
+        }
+
+        function updateUserUI() {
+            document.getElementById("user-name-span").innerText = currentUser.displayName;
+            document.getElementById("user-id-badge").innerText = `User ID: ${currentUser.userId}`;
+        }
+
+        // 檢查是否取得授權，再檢查管理員狀態並載入資料
+        function checkAdminAndLoadData() {
+            document.getElementById("loading").style.display = "flex";
+            
+            // 1. 驗證是否在授權白名單或管理員名單中
+            fetch(`/api/is_allowed?userId=${encodeURIComponent(currentUser.userId)}`)
+                .then(res => res.json())
+                .then(allowedData => {
+                    const lockScreen = document.getElementById("unauthorized-lock");
+                    
+                    if (!allowedData.is_allowed) {
+                        // 未被授權：顯示鎖定畫面，顯示 ID
+                        document.getElementById("lock-user-id").innerText = currentUser.userId;
+                        lockScreen.style.display = "flex";
+                        document.getElementById("loading").style.display = "none";
+                        return;
+                    }
+                    
+                    // 已授權：隱藏鎖定畫面，繼續進行管理員判斷與資料載入
+                    lockScreen.style.display = "none";
+                    
+                    // 2. 驗證是否為管理員
+                    fetch(`/api/is_admin?userId=${encodeURIComponent(currentUser.userId)}`)
+                        .then(res => res.json())
+                        .then(adminData => {
+                            const adminBtn = document.getElementById("admin-btn");
+                            if (adminData.is_admin) {
+                                adminBtn.style.display = "flex";
+                                // 更新後台按鈕的網址，帶上身份標記
+                                adminBtn.href = `/admin?userId=${encodeURIComponent(currentUser.userId)}`;
+                            } else {
+                                adminBtn.style.display = "none";
+                            }
+                            
+                            // 3. 載入資料庫資料
+                            loadDatabaseData();
+                        })
+                        .catch(err => {
+                            console.error('管理員驗證錯誤:', err);
+                            loadDatabaseData();
+                        });
+                })
+                .catch(err => {
+                    console.error('權限驗證錯誤:', err);
+                    // 網路出錯時，預設先嘗試載入資料（避免因 API 暫時出錯導致正常人無法使用）
+                    loadDatabaseData();
+                });
+        }
+
+        // 載入表格所有資料
+        function loadDatabaseData() {
+            fetch('/api/init_data')
+                .then(res => res.json())
+                .then(data => {
+                    appData = data;
+                    
+                    // 填入棟別下拉選單
+                    renderBlockSelector();
+                    
+                    // 渲染表格
+                    renderProgressTable();
+                    
+                    document.getElementById("loading").style.display = "none";
+                })
+                .catch(err => {
+                    console.error('讀取資料庫失敗:', err);
+                    document.getElementById("loading").style.display = "none";
+                    alert('資料加載失敗，請檢查後端服務是否啟動。');
+                });
+        }
+
+        // =====================================================================
+        // UI 渲染與互動邏輯
+        // =====================================================================
+        function renderBlockSelector() {
+            const select = document.getElementById("block-select");
+            const previousValue = select.value;
+            select.innerHTML = "";
+            
+            if (appData.blocks.length === 0) {
+                const opt = document.createElement("option");
+                opt.text = "無現有棟別";
+                select.add(opt);
+                return;
+            }
+            
+            appData.blocks.forEach(b => {
+                const opt = document.createElement("option");
+                opt.value = b.id;
+                opt.text = b.name;
+                select.add(opt);
+            });
+            
+            // 恢復原本的選取值或預設選第一個
+            if (previousValue && appData.blocks.some(b => b.id == previousValue)) {
+                select.value = previousValue;
+            }
+            
+            // 綁定變更事件
+            select.onchange = function() {
+                renderProgressTable();
+            };
+        }
+
+        function renderProgressTable() {
+            const table = document.getElementById("progress-table");
+            table.innerHTML = "";
+            
+            const currentBlockId = document.getElementById("block-select").value;
+            if (!currentBlockId || appData.blocks.length === 0) {
+                table.innerHTML = "<tr><td style='color: var(--text-secondary); padding: 20px;'>請先到管理後台新增棟別。</td></tr>";
+                return;
+            }
+            
+            if (appData.floors.length === 0 || appData.work_items.length === 0) {
+                table.innerHTML = "<tr><td style='color: var(--text-secondary); padding: 20px;'>請先到管理後台設定「樓層」與「工項」。</td></tr>";
+                return;
+            }
+            
+            // 1. 對樓層進行排序 (從高至低)
+            const sortedFloors = sortFloors([...appData.floors]);
+            
+            // 2. 對工項按「工種分類」進行群組，準備建構雙層表頭
+            const categories = {};
+            appData.work_items.forEach(item => {
+                if (!categories[item.category]) {
+                    categories[item.category] = [];
+                }
+                categories[item.category].push(item);
+            });
+            
+            // ==========================================
+            // 建立表頭 Thead (雙層表頭，分類在上列，工項在下列)
+            // ==========================================
+            const thead = document.createElement("thead");
+            
+            // 第一行：工種分類大標題
+            const tr1 = document.createElement("tr");
+            const thFloor = document.createElement("th");
+            thFloor.innerText = "樓層";
+            thFloor.rowSpan = 2;
+            thFloor.className = "floor-col";
+            tr1.appendChild(thFloor);
+            
+            Object.keys(categories).forEach(cat => {
+                const thCat = document.createElement("th");
+                thCat.innerText = cat;
+                thCat.colSpan = categories[cat].length;
+                thCat.className = "category-header";
+                tr1.appendChild(thCat);
+            });
+            thead.appendChild(tr1);
+            
+            // 第二行：具體工項小標題
+            const tr2 = document.createElement("tr");
+            Object.keys(categories).forEach(cat => {
+                categories[cat].forEach(item => {
+                    const thItem = document.createElement("th");
+                    thItem.innerText = item.name;
+                    tr2.appendChild(thItem);
+                });
+            });
+            thead.appendChild(tr2);
+            table.appendChild(thead);
+            
+            // ==========================================
+            // 建立表身 Tbody (樓層 rows)
+            // ==========================================
+            const tbody = document.createElement("tbody");
+            sortedFloors.forEach(floor => {
+                const tr = document.createElement("tr");
+                
+                // 樓層首欄
+                const tdFloor = document.createElement("td");
+                tdFloor.innerText = floor.name;
+                tdFloor.className = "floor-col";
+                tr.appendChild(tdFloor);
+                
+                // 進度格子 (依據分類群組順序依序渲染)
+                Object.keys(categories).forEach(cat => {
+                    categories[cat].forEach(item => {
+                        const tdCell = document.createElement("td");
+                        tdCell.className = "cell-progress";
+                        
+                        const progressKey = `${currentBlockId}_${floor.id}_${item.id}`;
+                        const progressInfo = appData.progress[progressKey];
+                        
+                        const isCompleted = progressInfo && progressInfo.status === 1;
+                        
+                        if (isCompleted) {
+                            tdCell.classList.add("cell-completed");
+                            tdCell.innerHTML = `
+                                <span class="cell-status-text">✓ 已完成</span>
+                            `;
+                            // 將詳細登記人與時間設定為單元格 HTML 懸停提示 (title)
+                            tdCell.title = `登記人: ${progressInfo.updated_by || '工程師'}\n更新時間: ${progressInfo.updated_at || ''}`;
+                        } else {
+                            tdCell.innerHTML = `
+                                <span class="cell-status-text" style="color: var(--text-secondary);">未完成</span>
+                            `;
+                            tdCell.title = "未完成";
+                        }
+                        
+                        // 點格子的變更事件
+                        tdCell.onclick = function() {
+                            openToggleModal(currentBlockId, floor, item, isCompleted);
+                        };
+                        
+                        tr.appendChild(tdCell);
+                    });
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+        }
+
+        // =====================================================================
+        // Modal 控制與進度更新 API 串接
+        // =====================================================================
+        let activeModalData = null;
+
+        function openToggleModal(blockId, floor, item, isCompleted) {
+            const blockName = document.getElementById("block-select").options[document.getElementById("block-select").selectedIndex].text;
+            activeModalData = { blockId, floorId: floor.id, workItemId: item.id, isCompleted };
+            
+            const actionText = isCompleted ? "標記為「未完成」" : "標記為「已完成」";
+            const targetText = `【${blockName} / ${floor.name} / ${item.category}-${item.name}】`;
+            
+            document.getElementById("modal-body").innerHTML = `
+                您確認要將 ${targetText} 的狀態變更為 <strong>${actionText}</strong> 嗎？<br><br>
+                登記人姓名將自動紀錄為：<strong>${currentUser.displayName}</strong>
+            `;
+            
+            const modal = document.getElementById("confirm-modal");
+            modal.style.display = "flex";
+            setTimeout(() => modal.classList.add("active"), 10);
+        }
+
+        function closeModal() {
+            const modal = document.getElementById("confirm-modal");
+            modal.classList.remove("active");
+            setTimeout(() => modal.style.display = "none", 300);
+            activeModalData = null;
+        }
+
+        document.getElementById("btn-modal-cancel").onclick = closeModal;
+
+        document.getElementById("btn-modal-confirm").onclick = function() {
+            if (!activeModalData) return;
+            
+            // 先備份 modal 資料，防止 closeModal() 將其設為 null
+            const modalData = activeModalData;
+            closeModal();
+            
+            document.getElementById("loading").style.display = "flex";
+            
+            fetch('/api/progress/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    block_id: modalData.blockId,
+                    floor_id: modalData.floorId,
+                    work_item_id: modalData.workItemId,
+                    user_id: currentUser.userId,
+                    user_name: currentUser.displayName
+                })
+            })
+            .then(res => res.json())
+            .then(res => {
+                if (res.success) {
+                    // 更新本地快取
+                    const key = `${modalData.blockId}_${modalData.floorId}_${modalData.workItemId}`;
+                    appData.progress[key] = {
+                        status: res.status,
+                        updated_by: res.updated_by,
+                        updated_at: res.updated_at
+                    };
+                    
+                    // 重新渲染表格
+                    renderProgressTable();
+                } else {
+                    alert('變更失敗：' + (res.error || '未知錯誤'));
+                }
+                document.getElementById("loading").style.display = "none";
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById("loading").style.display = "none";
+                alert('網路錯誤，無法變更狀態。');
+            });
+        };
+
+        function downloadCSV() {
+            if (!appData || !appData.blocks || !appData.floors || !appData.work_items) {
+                alert("資料未載入，無法下載！");
+                return;
+            }
+            
+            const blockSelect = document.getElementById("block-select");
+            const blockName = blockSelect.options[blockSelect.selectedIndex].text;
+            
+            // 1. 取得樓層並排序
+            const sortedFloors = sortFloors([...appData.floors]);
+            
+            // 2. 取得分類並群組工項
+            const categories = {};
+            appData.work_items.forEach(item => {
+                if (!categories[item.category]) {
+                    categories[item.category] = [];
+                }
+                categories[item.category].push(item);
+            });
+            
+            // 3. 建立 CSV 標頭
+            let csvRows = [];
+            
+            // 第一行：樓層, 工種1, 工種1, 工種2...
+            let row1 = ["樓層"];
+            Object.keys(categories).forEach(cat => {
+                categories[cat].forEach(() => {
+                    row1.push(cat);
+                });
+            });
+            csvRows.push(row1.map(val => `"${val.replace(/"/g, '""')}"`).join(","));
+            
+            // 第二行：, 工項1-1, 工項1-2, 工項2-1...
+            let row2 = [""];
+            Object.keys(categories).forEach(cat => {
+                categories[cat].forEach(item => {
+                    row2.push(item.name);
+                });
+            });
+            csvRows.push(row2.map(val => `"${val.replace(/"/g, '""')}"`).join(","));
+            
+            // 4. 建立每層樓的進度資料
+            sortedFloors.forEach(floor => {
+                let row = [floor.name];
+                Object.keys(categories).forEach(cat => {
+                    categories[cat].forEach(item => {
+                        const progressKey = `${currentBlockId}_${floor.id}_${item.id}`;
+                        const progressInfo = appData.progress[progressKey];
+                        const isCompleted = progressInfo && progressInfo.status === 1;
+                        
+                        if (isCompleted) {
+                            const updater = progressInfo.updated_by || '工程師';
+                            const updateTime = progressInfo.updated_at || '';
+                            row.push(`已完成 (${updater} ${updateTime})`);
+                        } else {
+                            row.push("未完成");
+                        }
+                    });
+                });
+                csvRows.push(row.map(val => `"${val.replace(/"/g, '""')}"`).join(","));
+            });
+            
+            // 5. 結合為 CSV 字串並加入 UTF-8 BOM 防止 Excel 亂碼
+            const csvContent = csvRows.join("\n");
+            const bom = "\uFEFF";
+            const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+            
+            // 6. 觸發瀏覽器下載
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `${blockName}_施工進度報表.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
