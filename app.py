@@ -13,84 +13,184 @@ app = Flask(__name__)
 # =====================================================================
 INIT_ADMIN_ID = "admin_test_123"  # <-- 請手動替換為您真實的 LINE User ID
 
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.db')
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+# 定義相容的唯一性衝突例外
+try:
+    import psycopg2
+    import psycopg2.extras
+    DBIntegrityError = (sqlite3.IntegrityError, psycopg2.IntegrityError)
+except ImportError:
+    DBIntegrityError = (sqlite3.IntegrityError,)
+
+class DBConnectionWrapper:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def cursor(self, *args, **kwargs):
+        cursor = self.conn.cursor(*args, **kwargs)
+        return DBCursorWrapper(cursor)
+
+    def commit(self):
+        return self.conn.commit()
+
+    def close(self):
+        return self.conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self.conn, name)
+
+class DBCursorWrapper:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def execute(self, sql, params=()):
+        if DATABASE_URL:
+            # PostgreSQL 佔位符替換
+            sql = sql.replace('?', '%s')
+            if "INSERT OR IGNORE" in sql:
+                sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+                if "ON CONFLICT" not in sql:
+                    sql = sql + " ON CONFLICT DO NOTHING"
+        self.cursor.execute(sql, params)
+        return self
+
+    def executemany(self, sql, seq_of_params):
+        if DATABASE_URL:
+            sql = sql.replace('?', '%s')
+            if "INSERT OR IGNORE" in sql:
+                sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+                if "ON CONFLICT" not in sql:
+                    sql = sql + " ON CONFLICT DO NOTHING"
+        self.cursor.executemany(sql, seq_of_params)
+        return self
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
 
 def get_db_connection():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")  # 啟用外鍵約束
-    return conn
+    if DATABASE_URL:
+        # 使用 PostgreSQL
+        url = DATABASE_URL
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.DictCursor)
+        return DBConnectionWrapper(conn)
+    else:
+        # 使用 SQLite
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.db')
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")  # 啟用外鍵約束
+        return conn
 
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. 建立 blocks 表（儲存棟別，如：A棟、B棟）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS blocks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
-    
-    # 2. 建立 floors 表（儲存樓層，如：1F、2F）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS floors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
-    
-    # 3. 建立 work_items 表（儲存工種與工項，包含工種分類與工項名稱）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS work_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT NOT NULL,
-            name TEXT NOT NULL,
-            UNIQUE(category, name)
-        )
-    ''')
-    
-    # 4. 建立 progress 表（儲存進度，關聯棟別ID、樓層ID、工項ID、完成狀態、登記者、完成時間）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            block_id INTEGER NOT NULL,
-            floor_id INTEGER NOT NULL,
-            work_item_id INTEGER NOT NULL,
-            status INTEGER NOT NULL DEFAULT 0,
-            updated_by TEXT,
-            updated_at TEXT,
-            FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE CASCADE,
-            FOREIGN KEY (floor_id) REFERENCES floors(id) ON DELETE CASCADE,
-            FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
-            UNIQUE(block_id, floor_id, work_item_id)
-        )
-    ''')
-    
-    # 5. 建立 admins 表（儲存管理員的 LINE User ID 名單）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS admins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            line_user_id TEXT UNIQUE NOT NULL
-        )
-    ''')
-    
-    # 6. 建立 allowed_users 表（儲存已授權工程師的 LINE User ID 名單與姓名）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS allowed_users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            line_user_id TEXT UNIQUE NOT NULL,
-            name TEXT NOT NULL
-        )
-    ''')
-    
-    # 寫入第一個預設管理員（方便測試）
-    if INIT_ADMIN_ID:
+    if DATABASE_URL:
+        # PostgreSQL 建立資料表 (使用 SERIAL 自增與 VARCHAR 類型)
         cursor.execute('''
-            INSERT OR IGNORE INTO admins (line_user_id) 
-            VALUES (?)
-        ''', (INIT_ADMIN_ID,))
+            CREATE TABLE IF NOT EXISTS blocks (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS floors (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS work_items (
+                id SERIAL PRIMARY KEY,
+                category VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                UNIQUE(category, name)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS progress (
+                id SERIAL PRIMARY KEY,
+                block_id INTEGER NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+                floor_id INTEGER NOT NULL REFERENCES floors(id) ON DELETE CASCADE,
+                work_item_id INTEGER NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+                status INTEGER NOT NULL DEFAULT 0,
+                updated_by VARCHAR(255),
+                updated_at VARCHAR(255),
+                UNIQUE(block_id, floor_id, work_item_id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                id SERIAL PRIMARY KEY,
+                line_user_id VARCHAR(255) UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS allowed_users (
+                id SERIAL PRIMARY KEY,
+                line_user_id VARCHAR(255) UNIQUE NOT NULL,
+                name VARCHAR(255) NOT NULL
+            )
+        ''')
+    else:
+        # SQLite 建立資料表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS blocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS floors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS work_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                name TEXT NOT NULL,
+                UNIQUE(category, name)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_id INTEGER NOT NULL,
+                floor_id INTEGER NOT NULL,
+                work_item_id INTEGER NOT NULL,
+                status INTEGER NOT NULL DEFAULT 0,
+                updated_by TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE CASCADE,
+                FOREIGN KEY (floor_id) REFERENCES floors(id) ON DELETE CASCADE,
+                FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+                UNIQUE(block_id, floor_id, work_item_id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                line_user_id TEXT UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS allowed_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                line_user_id TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL
+            )
+        ''')
         
     # 定義新版工項清單 (分類與項目名稱均比對圖片，並已去除浴室、外牆重複項目)
     new_default_work_items = [
@@ -148,36 +248,73 @@ def init_db():
 
     # === 自動數據結構遷移 ===
     # 檢查是否需要更新工項結構 (如果舊的 '油漆' 或 '鋼筋綁紮' 存在，則重設工項與進度)
-    cursor.execute("SELECT COUNT(*) FROM work_items WHERE category = '油漆' OR name = '鋼筋綁紮'")
-    if cursor.fetchone()[0] > 0:
+    # 由於 work_items 在新庫第一次啟動時可能尚未被建立（尤其是在 PostgreSQL 中），我們先確認該表是否存在，再進行查詢
+    try:
+        cursor.execute("SELECT COUNT(*) FROM work_items WHERE category = '油漆' OR name = '鋼筋綁紮'")
+        has_old_data = cursor.fetchone()[0] > 0
+    except Exception:
+        has_old_data = False
+        # 如果發生例外（代表 work_items 尚未建立，或資料庫為全新），我們藉由 commit 重置交易狀態
+        conn.commit()
+        cursor = conn.cursor()
+        
+    if has_old_data:
         cursor.execute("DROP TABLE IF EXISTS progress")
         cursor.execute("DROP TABLE IF EXISTS work_items")
-        # 重新建立被刪除的表
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS work_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                category TEXT NOT NULL,
-                name TEXT NOT NULL,
-                UNIQUE(category, name)
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS progress (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                block_id INTEGER NOT NULL,
-                floor_id INTEGER NOT NULL,
-                work_item_id INTEGER NOT NULL,
-                status INTEGER NOT NULL DEFAULT 0,
-                updated_by TEXT,
-                updated_at TEXT,
-                FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE CASCADE,
-                FOREIGN KEY (floor_id) REFERENCES floors(id) ON DELETE CASCADE,
-                FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
-                UNIQUE(block_id, floor_id, work_item_id)
-            )
-        ''')
+        if DATABASE_URL:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS work_items (
+                    id SERIAL PRIMARY KEY,
+                    category VARCHAR(255) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    UNIQUE(category, name)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS progress (
+                    id SERIAL PRIMARY KEY,
+                    block_id INTEGER NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+                    floor_id INTEGER NOT NULL REFERENCES floors(id) ON DELETE CASCADE,
+                    work_item_id INTEGER NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+                    status INTEGER NOT NULL DEFAULT 0,
+                    updated_by VARCHAR(255),
+                    updated_at VARCHAR(255),
+                    UNIQUE(block_id, floor_id, work_item_id)
+                )
+            ''')
+        else:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS work_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    UNIQUE(category, name)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS progress (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    block_id INTEGER NOT NULL,
+                    floor_id INTEGER NOT NULL,
+                    work_item_id INTEGER NOT NULL,
+                    status INTEGER NOT NULL DEFAULT 0,
+                    updated_by TEXT,
+                    updated_at TEXT,
+                    FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE CASCADE,
+                    FOREIGN KEY (floor_id) REFERENCES floors(id) ON DELETE CASCADE,
+                    FOREIGN KEY (work_item_id) REFERENCES work_items(id) ON DELETE CASCADE,
+                    UNIQUE(block_id, floor_id, work_item_id)
+                )
+            ''')
         # 直接填充新版工項
         cursor.executemany("INSERT INTO work_items (category, name) VALUES (?, ?)", new_default_work_items)
+    
+    # 寫入第一個預設管理員（方便測試）
+    if INIT_ADMIN_ID:
+        cursor.execute('''
+            INSERT OR IGNORE INTO admins (line_user_id) 
+            VALUES (?)
+        ''', (INIT_ADMIN_ID,))
     
     # 寫入預設測試資料 (若 blocks 為空，通常是首次初始化)
     cursor.execute("SELECT COUNT(*) FROM blocks")
@@ -396,7 +533,7 @@ def add_block():
         conn.commit()
         conn.close()
         return jsonify({"success": True})
-    except sqlite3.IntegrityError:
+    except DBIntegrityError:
         return jsonify({"error": "該棟別已存在"}), 400
 
 # 3. 刪除棟別
@@ -437,7 +574,7 @@ def add_floor():
         conn.commit()
         conn.close()
         return jsonify({"success": True})
-    except sqlite3.IntegrityError:
+    except DBIntegrityError:
         return jsonify({"error": "該樓層已存在"}), 400
 
 # 5. 刪除樓層
@@ -479,7 +616,7 @@ def add_work_item():
         conn.commit()
         conn.close()
         return jsonify({"success": True})
-    except sqlite3.IntegrityError:
+    except DBIntegrityError:
         return jsonify({"error": "該工項已存在於此分類中"}), 400
 
 # 7. 刪除工項
@@ -520,7 +657,7 @@ def add_admin():
         conn.commit()
         conn.close()
         return jsonify({"success": True})
-    except sqlite3.IntegrityError:
+    except DBIntegrityError:
         return jsonify({"error": "該管理員已在名單中"}), 400
 
 # 9. 刪除管理員
@@ -569,7 +706,7 @@ def add_allowed_user():
         conn.commit()
         conn.close()
         return jsonify({"success": True})
-    except sqlite3.IntegrityError:
+    except DBIntegrityError:
         return jsonify({"error": "該 User ID 已在授權名單中"}), 400
 
 # 11. 刪除授權工程師 (白名單)
