@@ -656,7 +656,7 @@
                         fallbackToMock();
                     } else {
                         // 在線上環境，初始化超時則嘗試強制跳轉至 LINE 登入頁面
-                        liff.login();
+                        secureLiffLogin();
                     }
                 }
             }, 1500);
@@ -665,6 +665,12 @@
                 showMockLoginPanel();
                 updateUserUI();
                 checkAdminAndLoadData();
+            }
+
+            function secureLiffLogin() {
+                // 取得乾淨的首頁網址（包含尾端斜線），確保與 LINE Developers 控制台註冊的 Endpoint URL 100% 一致，避免 400 Bad Request
+                const cleanUrl = window.location.origin + '/';
+                liff.login({ redirectUri: cleanUrl });
             }
 
             try {
@@ -690,14 +696,14 @@
                                     updateUserUI();
                                     checkAdminAndLoadData();
                                 } else {
-                                    liff.login();
+                                    secureLiffLogin();
                                 }
                             });
                         } else {
                             if (isDev) {
                                 fallbackToMock();
                             } else {
-                                liff.login();
+                                secureLiffLogin();
                             }
                         }
                     })
