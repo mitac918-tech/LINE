@@ -640,8 +640,21 @@
             initLIFF();
         });
 
+        function showLoginError(message) {
+            document.getElementById("loading").innerHTML = `
+                <div style="background: rgba(15, 23, 42, 0.95); padding: 30px; border-radius: 12px; border: 1px solid var(--glass-border); max-width: 400px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center; gap: 16px; margin: auto;">
+                    <div style="font-size: 3rem;">⚠️</div>
+                    <div style="font-size: 1.2rem; font-weight: 700; color: #f8fafc;">無法完成 LINE 登入</div>
+                    <div style="color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; text-align: left;">${message}</div>
+                    <button onclick="location.reload()" style="background: var(--primary); border: none; color: white; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s;">重新載入頁面</button>
+                </div>
+            `;
+        }
+
         function initLIFF() {
             const isDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasLoginCallback = urlParams.has("code") && urlParams.has("state");
 
             if (typeof liff === 'undefined') {
                 console.log("LINE LIFF SDK 未載入");
@@ -655,18 +668,22 @@
 
             let liffInitialized = false;
 
-            // 設定 1.5 秒超時
+            // 設定 3 秒超時
             const timeoutId = setTimeout(() => {
                 if (!liffInitialized) {
                     console.log("LIFF 初始化超時");
                     if (isDev) {
                         fallbackToMock();
                     } else {
-                        // 在線上環境，初始化超時則嘗試強制跳轉至 LINE 登入頁面
-                        secureLiffLogin();
+                        // 在線上環境，如果已經有 login callback 了就不要重定向，避免干擾 liff.init() 的後續 Token 交換
+                        if (!hasLoginCallback) {
+                            secureLiffLogin();
+                        } else {
+                            console.log("已有登入 Callback，等待 Token 交換中...");
+                        }
                     }
                 }
-            }, 1500);
+            }, 3000);
 
             function fallbackToMock() {
                 showMockLoginPanel();
@@ -703,14 +720,18 @@
                                     updateUserUI();
                                     checkAdminAndLoadData();
                                 } else {
-                                    secureLiffLogin();
+                                    showLoginError("LINE 登入成功，但無法取得您的個人檔案。請確認您的 LINE 帳號已同意檔案授權，或嘗試換用其他瀏覽器或手機打開。");
                                 }
                             });
                         } else {
                             if (isDev) {
                                 fallbackToMock();
                             } else {
-                                secureLiffLogin();
+                                if (hasLoginCallback) {
+                                    showLoginError("偵測到 LINE 登入驗證已完成，但瀏覽器無法儲存登入狀態。這通常是因為您開啟了「無痕視窗」或「阻擋 Cookie/Cookie 限制」保護。請嘗試使用一般的瀏覽器視窗開啟，或直接使用手機 LINE App 打開此連結。");
+                                } else {
+                                    secureLiffLogin();
+                                }
                             }
                         }
                     })
