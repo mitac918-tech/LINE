@@ -282,9 +282,14 @@
                 <div class="card-title">建案管理 (Projects)</div>
                 <div class="form-group">
                     <label>新增建案</label>
-                    <div class="form-row">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
                         <input type="text" id="new-project-name" placeholder="輸入建案名稱 (例如: 帝景天廈)">
-                        <button class="btn-add" onclick="addProject()">新增</button>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <select id="copy-project-select" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: 8px; padding: 8px; font-size: 0.85rem; height: 38px; outline: none;">
+                                <option value="">不複製 (建立全新空白專案)</option>
+                            </select>
+                            <button class="btn-add" style="height: 38px; min-width: 80px;" onclick="addProject()">新增</button>
+                        </div>
                     </div>
                 </div>
                 <label>目前現有建案</label>
@@ -518,6 +523,16 @@
                     cbContainer.appendChild(label);
                 });
             }
+
+            // 3. 渲染「複製既有建案配置」下拉選單
+            const copySelect = document.getElementById("copy-project-select");
+            copySelect.innerHTML = '<option value="">不複製 (建立全新空白專案)</option>';
+            configData.projects.forEach(p => {
+                const opt = document.createElement("option");
+                opt.value = p.id;
+                opt.text = `複製「${p.name}」的配置`;
+                copySelect.add(opt);
+            });
         }
 
         function onProjectFilterChange() {
@@ -556,7 +571,10 @@
                 const isDefault = p.id === 1;
                 item.innerHTML = `
                     <span class="list-item-text">${p.name} ${isDefault ? '<small style="color: var(--text-secondary)">(系統保留)</small>' : ''}</span>
-                    ${isDefault ? '' : `<button class="btn-delete" onclick="deleteProject(${p.id}, '${p.name}')">🗑 刪除</button>`}
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-delete" style="color: var(--primary);" onclick="editProject(${p.id}, '${p.name}')">✏️ 編輯</button>
+                        ${isDefault ? '' : `<button class="btn-delete" onclick="deleteProject(${p.id}, '${p.name}')">🗑 刪除</button>`}
+                    </div>
                 `;
                 container.appendChild(item);
             });
@@ -578,7 +596,10 @@
                 item.className = "list-item";
                 item.innerHTML = `
                     <span class="list-item-text">${b.name}</span>
-                    <button class="btn-delete" onclick="deleteBlock(${b.id}, '${b.name}')">🗑 刪除</button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-delete" style="color: var(--primary);" onclick="editBlock(${b.id}, '${b.name}')">✏️ 編輯</button>
+                        <button class="btn-delete" onclick="deleteBlock(${b.id}, '${b.name}')">🗑 刪除</button>
+                    </div>
                 `;
                 container.appendChild(item);
             });
@@ -600,7 +621,10 @@
                 item.className = "list-item";
                 item.innerHTML = `
                     <span class="list-item-text">${f.name}</span>
-                    <button class="btn-delete" onclick="deleteFloor(${f.id}, '${f.name}')">🗑 刪除</button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-delete" style="color: var(--primary);" onclick="editFloor(${f.id}, '${f.name}')">✏️ 編輯</button>
+                        <button class="btn-delete" onclick="deleteFloor(${f.id}, '${f.name}')">🗑 刪除</button>
+                    </div>
                 `;
                 container.appendChild(item);
             });
@@ -625,7 +649,10 @@
                         <span class="list-item-subtext" style="background: rgba(99,102,241,0.2); padding: 2px 6px; border-radius: 4px; color: #a5b4fc; font-size: 0.75rem; margin-left: 0; margin-right: 8px;">${item.category}</span>
                         <span class="list-item-text">${item.name}</span>
                     </div>
-                    <button class="btn-delete" onclick="deleteWorkItem(${item.id}, '${item.category}-${item.name}')">🗑 刪除</button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-delete" style="color: var(--primary);" onclick="editWorkItem(${item.id}, '${item.category}', '${item.name}')">✏️ 編輯</button>
+                        <button class="btn-delete" onclick="deleteWorkItem(${item.id}, '${item.category}-${item.name}')">🗑 刪除</button>
+                    </div>
                 `;
                 container.appendChild(div);
             });
@@ -732,10 +759,20 @@
         // 建案管理
         function addProject() {
             const input = document.getElementById("new-project-name");
+            const copySelect = document.getElementById("copy-project-select");
             const name = input.value.trim();
+            const copyFromProjectId = copySelect.value;
+            
             if (!name) return;
-            postAdminAction("/api/admin/add_project", { name }, () => {
+            
+            const payload = { name };
+            if (copyFromProjectId) {
+                payload.copyFromProjectId = parseInt(copyFromProjectId);
+            }
+            
+            postAdminAction("/api/admin/add_project", payload, () => {
                 input.value = "";
+                copySelect.value = "";
             });
         }
         
@@ -746,6 +783,60 @@
             }
             if (!confirm(`警告：刪除建案「${name}」將會永久刪除該建案下的所有棟別、樓層、施工工項以及所有的施工進度紀錄！此操作完全不可逆，是否確認刪除？`)) return;
             postAdminAction("/api/admin/delete_project", { id }, () => {});
+        }
+
+        // 編輯基礎名稱的彈框與 API 呼叫
+        function editProject(id, oldName) {
+            const name = prompt("請輸入新的建案名稱：", oldName);
+            if (name === null) return;
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                alert("建案名稱不能為空");
+                return;
+            }
+            postAdminAction("/api/admin/edit_project", { id, name: trimmedName }, () => {});
+        }
+
+        function editBlock(id, oldName) {
+            const name = prompt("請輸入新的棟別名稱：", oldName);
+            if (name === null) return;
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                alert("棟別名稱不能為空");
+                return;
+            }
+            postAdminAction("/api/admin/edit_block", { id, name: trimmedName }, () => {});
+        }
+
+        function editFloor(id, oldName) {
+            const name = prompt("請輸入新的樓層名稱：", oldName);
+            if (name === null) return;
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                alert("樓層名稱不能為空");
+                return;
+            }
+            postAdminAction("/api/admin/edit_floor", { id, name: trimmedName }, () => {});
+        }
+
+        function editWorkItem(id, oldCategory, oldName) {
+            const category = prompt("請輸入新的工種分類：", oldCategory);
+            if (category === null) return;
+            const trimmedCategory = category.trim();
+            if (!trimmedCategory) {
+                alert("工種分類不能為空");
+                return;
+            }
+            
+            const name = prompt("請輸入新的工項名稱：", oldName);
+            if (name === null) return;
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                alert("工項名稱不能為空");
+                return;
+            }
+            
+            postAdminAction("/api/admin/edit_work_item", { id, category: trimmedCategory, name: trimmedName }, () => {});
         }
 
         // 棟別
