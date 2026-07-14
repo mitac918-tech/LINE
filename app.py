@@ -590,6 +590,57 @@ def get_user_allowed_projects(line_user_id):
     conn.close()
     return projects
 
+def send_line_notification(message):
+    import urllib.request
+    import json
+    
+    line_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+    if not line_token:
+        print("LINE_CHANNEL_ACCESS_TOKEN 未設定，跳過推播通知。")
+        return
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        admins = [r[0] for r in cursor.execute("SELECT line_user_id FROM admins").fetchall()]
+        conn.close()
+    except Exception as e:
+        print(f"獲取管理員清單失敗: {e}")
+        return
+
+    # 篩選真實的 LINE User ID (以 U 開頭且長度為 33 碼)
+    valid_admin_ids = [aid for aid in admins if aid.startswith('U') and len(aid) == 33]
+    if not valid_admin_ids:
+        print("無有效的管理員 LINE ID (U...33碼)，跳過推播。")
+        return
+
+    url = 'https://api.line.me/v2/bot/message/multicast'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {line_token}'
+    }
+    
+    payload = {
+        'to': valid_admin_ids,
+        'messages': [
+            {
+                'type': 'text',
+                'text': message
+            }
+        ]
+    }
+    
+    try:
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=5) as response:
+            res_body = response.read().decode('utf-8')
+            print(f"LINE Multicast 推播成功: {res_body}")
+    except urllib.error.HTTPError as e:
+        print(f"LINE Multicast 推播失敗 HTTPError: {e.code} - {e.read().decode('utf-8')}")
+    except Exception as e:
+        print(f"LINE Multicast 推播發生異常: {e}")
+
 # =====================================================================
 # 頁面路由
 # =====================================================================
@@ -737,6 +788,8 @@ def toggle_progress():
     tz_taiwan = timezone(timedelta(hours=8))
     now_str = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M:%S")
     
+    trigger_notification = False
+    
     if row is None:
         # 原本無資料，直接設為已完成 (1)
         cursor.execute('''
@@ -744,6 +797,7 @@ def toggle_progress():
             VALUES (?, ?, ?, 1, ?, ?)
         ''', (block_id, floor_id, work_item_id, user_name, now_str))
         new_status = 1
+        trigger_notification = True
     else:
         # 原本有資料，切換狀態 (1 -> 0, 0 -> 1)
         new_status = 0 if row[0] == 1 else 1
@@ -752,9 +806,40 @@ def toggle_progress():
             SET status = ?, updated_by = ?, updated_at = ?
             WHERE block_id = ? AND floor_id = ? AND work_item_id = ?
         ''', (new_status, user_name, now_str, block_id, floor_id, work_item_id))
+        trigger_notification = (new_status == 1)
         
     conn.commit()
     conn.close()
+    
+    if trigger_notification:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT p.name, b.name, f.name, w.category, w.name
+                FROM work_items w
+                JOIN projects p ON w.project_id = p.id
+                JOIN blocks b ON b.id = ?
+                JOIN floors f ON f.id = ?
+                WHERE w.id = ?
+            ''', (block_id, floor_id, work_item_id))
+            info = cursor.fetchone()
+            conn.close()
+            
+            if info:
+                project_name, block_name, floor_name, category, item_name = info
+                msg = (
+                    f"📢 [工地進度更新通知]\n"
+                    f"🚧 建案：{project_name}\n"
+                    f"📍 區域：{block_name} - {floor_name}\n"
+                    f"🔨 工項：[{category}] {item_name} 已完工！\n"
+                    f"👤 登記人：{user_name}\n"
+                    f"🕒 時間：{now_str}"
+                )
+                import threading
+                threading.Thread(target=send_line_notification, args=(msg,)).start()
+        except Exception as e:
+            print(f"建構通知訊息失敗: {e}")
     
     return jsonify({
         "success": True, 
