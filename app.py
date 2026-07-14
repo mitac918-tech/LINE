@@ -90,30 +90,58 @@ def get_db_connection():
         conn.execute("PRAGMA foreign_keys = ON;")  # 啟用外鍵約束
         return conn
 
+def add_project_id_column_if_not_exists(cursor, conn, table_name):
+    if DATABASE_URL:
+        # PostgreSQL: 檢查 column 是否存在
+        cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='project_id'")
+        exists = cursor.fetchone()
+        if not exists:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE")
+    else:
+        # SQLite: 檢查 column 是否存在
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        cols = [row[1] for row in cursor.fetchall()]
+        if 'project_id' not in cols:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE")
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    if not DATABASE_URL:
+        cursor.execute("PRAGMA foreign_keys = OFF;")
+    
     if DATABASE_URL:
         # PostgreSQL 建立資料表 (使用 SERIAL 自增與 VARCHAR 類型)
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS blocks (
+            CREATE TABLE IF NOT EXISTS projects (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS blocks (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                UNIQUE(project_id, name)
             )
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS floors (
                 id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                UNIQUE(project_id, name)
             )
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS work_items (
                 id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 category VARCHAR(255) NOT NULL,
                 name VARCHAR(255) NOT NULL,
-                UNIQUE(category, name)
+                UNIQUE(project_id, category, name)
             )
         ''')
         cursor.execute('''
@@ -141,26 +169,45 @@ def init_db():
                 name VARCHAR(255) NOT NULL
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_permissions (
+                id SERIAL PRIMARY KEY,
+                allowed_user_id INTEGER NOT NULL REFERENCES allowed_users(id) ON DELETE CASCADE,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE(allowed_user_id, project_id)
+            )
+        ''')
     else:
         # SQLite 建立資料表
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS blocks (
+            CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS blocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                UNIQUE(project_id, name)
             )
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS floors (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                UNIQUE(project_id, name)
             )
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS work_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 category TEXT NOT NULL,
                 name TEXT NOT NULL,
-                UNIQUE(category, name)
+                UNIQUE(project_id, category, name)
             )
         ''')
         cursor.execute('''
@@ -191,7 +238,125 @@ def init_db():
                 name TEXT NOT NULL
             )
         ''')
-        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                allowed_user_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                FOREIGN KEY (allowed_user_id) REFERENCES allowed_users(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE(allowed_user_id, project_id)
+            )
+        ''')
+
+    # === 自動數據結構遷移 (Migration) ===
+    # 寫入預設專案
+    cursor.execute("SELECT COUNT(*) FROM projects")
+    if cursor.fetchone()[0] == 0:
+        if DATABASE_URL:
+            # PostgreSQL
+            cursor.execute("INSERT INTO projects (id, name) VALUES (1, '預設建案') ON CONFLICT DO NOTHING")
+            # 重設序列起點
+            try:
+                cursor.execute("SELECT setval('projects_id_seq', 1)")
+            except Exception:
+                pass
+        else:
+            cursor.execute("INSERT OR IGNORE INTO projects (id, name) VALUES (1, '預設建案')")
+
+    # 為現有表新增 project_id 欄位
+    add_project_id_column_if_not_exists(cursor, conn, "blocks")
+    add_project_id_column_if_not_exists(cursor, conn, "floors")
+    add_project_id_column_if_not_exists(cursor, conn, "work_items")
+
+    # 將現有的 null 欄位更新為 1 (預設建案)
+    cursor.execute("UPDATE blocks SET project_id = 1 WHERE project_id IS NULL")
+    cursor.execute("UPDATE floors SET project_id = 1 WHERE project_id IS NULL")
+    cursor.execute("UPDATE work_items SET project_id = 1 WHERE project_id IS NULL")
+
+    # 執行約束遷移（自適應資料庫引擎）
+    if not DATABASE_URL:
+        # SQLite Constraint Migration
+        # 檢查 blocks 是否需要更新約束
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='blocks'")
+        sql_blocks = cursor.fetchone()[0]
+        if "UNIQUE(project_id" not in sql_blocks and "UNIQUE (project_id" not in sql_blocks:
+            cursor.execute("ALTER TABLE blocks RENAME TO old_blocks")
+            cursor.execute('''
+                CREATE TABLE blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    UNIQUE(project_id, name)
+                )
+            ''')
+            cursor.execute("INSERT INTO blocks (id, project_id, name) SELECT id, COALESCE(project_id, 1), name FROM old_blocks")
+            cursor.execute("DROP TABLE old_blocks")
+
+        # 檢查 floors 是否需要更新約束
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='floors'")
+        sql_floors = cursor.fetchone()[0]
+        if "UNIQUE(project_id" not in sql_floors and "UNIQUE (project_id" not in sql_floors:
+            cursor.execute("ALTER TABLE floors RENAME TO old_floors")
+            cursor.execute('''
+                CREATE TABLE floors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    UNIQUE(project_id, name)
+                )
+            ''')
+            cursor.execute("INSERT INTO floors (id, project_id, name) SELECT id, COALESCE(project_id, 1), name FROM old_floors")
+            cursor.execute("DROP TABLE old_floors")
+
+        # 檢查 work_items 是否需要更新約束
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='work_items'")
+        sql_work = cursor.fetchone()[0]
+        if "UNIQUE(project_id" not in sql_work and "UNIQUE (project_id" not in sql_work:
+            cursor.execute("ALTER TABLE work_items RENAME TO old_work_items")
+            cursor.execute('''
+                CREATE TABLE work_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    category TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    UNIQUE(project_id, category, name)
+                )
+            ''')
+            cursor.execute("INSERT INTO work_items (id, project_id, category, name) SELECT id, COALESCE(project_id, 1), category, name FROM old_work_items")
+            cursor.execute("DROP TABLE old_work_items")
+    else:
+        # PostgreSQL Constraint Migration
+        # 變更 blocks 唯一約束
+        cursor.execute('''
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE table_name='blocks' AND constraint_name='blocks_project_id_name_key'
+        ''')
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE blocks DROP CONSTRAINT IF EXISTS blocks_name_key")
+            cursor.execute("ALTER TABLE blocks ADD CONSTRAINT blocks_project_id_name_key UNIQUE (project_id, name)")
+
+        # 變更 floors 唯一約束
+        cursor.execute('''
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE table_name='floors' AND constraint_name='floors_project_id_name_key'
+        ''')
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE floors DROP CONSTRAINT IF EXISTS floors_name_key")
+            cursor.execute("ALTER TABLE floors ADD CONSTRAINT floors_project_id_name_key UNIQUE (project_id, name)")
+
+        # 變更 work_items 唯一約束
+        cursor.execute('''
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE table_name='work_items' AND constraint_name='work_items_project_id_category_name_key'
+        ''')
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE work_items DROP CONSTRAINT IF EXISTS work_items_category_name_key")
+            cursor.execute("ALTER TABLE work_items ADD CONSTRAINT work_items_project_id_category_name_key UNIQUE (project_id, category, name)")
+
     # 定義新版工項清單 (分類與項目名稱均比對圖片，並已去除浴室、外牆重複項目)
     new_default_work_items = [
         ("結構", "灌漿"),
@@ -246,15 +411,13 @@ def init_db():
         ("內牆", "粉光")
     ]
 
-    # === 自動數據結構遷移 ===
+    # === 自動數據結構遷移 (判斷是否需要載入預設項目) ===
     # 檢查是否需要更新工項結構 (如果舊的 '油漆' 或 '鋼筋綁紮' 存在，則重設工項與進度)
-    # 由於 work_items 在新庫第一次啟動時可能尚未被建立（尤其是在 PostgreSQL 中），我們先確認該表是否存在，再進行查詢
     try:
         cursor.execute("SELECT COUNT(*) FROM work_items WHERE category = '油漆' OR name = '鋼筋綁紮'")
         has_old_data = cursor.fetchone()[0] > 0
     except Exception:
         has_old_data = False
-        # 如果發生例外（代表 work_items 尚未建立，或資料庫為全新），我們藉由 commit 重置交易狀態
         conn.commit()
         cursor = conn.cursor()
         
@@ -265,9 +428,10 @@ def init_db():
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS work_items (
                     id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                     category VARCHAR(255) NOT NULL,
                     name VARCHAR(255) NOT NULL,
-                    UNIQUE(category, name)
+                    UNIQUE(project_id, category, name)
                 )
             ''')
             cursor.execute('''
@@ -286,9 +450,10 @@ def init_db():
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS work_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                     category TEXT NOT NULL,
                     name TEXT NOT NULL,
-                    UNIQUE(category, name)
+                    UNIQUE(project_id, category, name)
                 )
             ''')
             cursor.execute('''
@@ -306,8 +471,9 @@ def init_db():
                     UNIQUE(block_id, floor_id, work_item_id)
                 )
             ''')
-        # 直接填充新版工項
-        cursor.executemany("INSERT INTO work_items (category, name) VALUES (?, ?)", new_default_work_items)
+        # 直接填充新版工項 (綁定為專案 1)
+        for cat, name in new_default_work_items:
+            cursor.execute("INSERT INTO work_items (project_id, category, name) VALUES (1, ?, ?)", (cat, name))
     
     # 寫入第一個預設管理員（方便測試）
     if INIT_ADMIN_ID:
@@ -315,20 +481,39 @@ def init_db():
             INSERT OR IGNORE INTO admins (line_user_id) 
             VALUES (?)
         ''', (INIT_ADMIN_ID,))
+        
+    # 將現有所有工程師預設開放預設建案 (id = 1) 的權限
+    if DATABASE_URL:
+        cursor.execute('''
+            INSERT INTO project_permissions (allowed_user_id, project_id)
+            SELECT id, 1 FROM allowed_users
+            ON CONFLICT DO NOTHING
+        ''')
+    else:
+        cursor.execute('''
+            INSERT OR IGNORE INTO project_permissions (allowed_user_id, project_id)
+            SELECT id, 1 FROM allowed_users
+        ''')
     
     # 寫入預設測試資料 (若 blocks 為空，通常是首次初始化)
     cursor.execute("SELECT COUNT(*) FROM blocks")
     if cursor.fetchone()[0] == 0:
         # 新增預設棟別
         default_blocks = [("A棟",), ("B棟",)]
-        cursor.executemany("INSERT INTO blocks (name) VALUES (?)", default_blocks)
+        for b in default_blocks:
+            cursor.execute("INSERT INTO blocks (project_id, name) VALUES (1, ?)", b)
         
         # 新增預設樓層
         default_floors = [("1F",), ("2F",), ("3F",), ("4F",), ("5F",)]
-        cursor.executemany("INSERT INTO floors (name) VALUES (?)", default_floors)
+        for f in default_floors:
+            cursor.execute("INSERT INTO floors (project_id, name) VALUES (1, ?)", f)
         
         # 新增預設工項
-        cursor.executemany("INSERT INTO work_items (category, name) VALUES (?, ?)", new_default_work_items)
+        for cat, name in new_default_work_items:
+            cursor.execute("INSERT INTO work_items (project_id, category, name) VALUES (1, ?, ?)", (cat, name))
+        
+    if not DATABASE_URL:
+        cursor.execute("PRAGMA foreign_keys = ON;")
         
     conn.commit()
     conn.close()
@@ -352,7 +537,7 @@ def is_admin_user(line_user_id):
 def is_allowed_user(line_user_id):
     if not line_user_id:
         return False
-    # 管理員預設擁有使用者權限，無須重複加白名單
+    # 管理員預設擁有使用者權限
     if is_admin_user(line_user_id):
         return True
     conn = get_db_connection()
@@ -361,6 +546,49 @@ def is_allowed_user(line_user_id):
     row = cursor.fetchone()
     conn.close()
     return row is not None
+
+def is_user_allowed_project(line_user_id, project_id):
+    if not line_user_id:
+        return False
+    if is_admin_user(line_user_id):
+        return True
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # 檢查該使用者是否在 allowed_users，且擁有該 project_id 的權限
+    cursor.execute('''
+        SELECT 1 FROM allowed_users u
+        JOIN project_permissions p ON u.id = p.allowed_user_id
+        WHERE u.line_user_id = ? AND p.project_id = ?
+    ''', (line_user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+def get_user_allowed_projects(line_user_id):
+    if not line_user_id:
+        return []
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if is_admin_user(line_user_id):
+        # 管理員有權限看所有專案
+        cursor.execute("SELECT id, name FROM projects ORDER BY id")
+        projects = [{"id": row[0], "name": row[1]} for row in cursor.fetchall()]
+    else:
+        # 一般工程師只能看被分配的專案
+        cursor.execute('''
+            SELECT p.id, p.name FROM projects p
+            JOIN project_permissions perm ON p.id = perm.project_id
+            JOIN allowed_users u ON perm.allowed_user_id = u.id
+            WHERE u.line_user_id = ?
+            ORDER BY p.id
+        ''', (line_user_id,))
+        projects = [{"id": row[0], "name": row[1]} for row in cursor.fetchall()]
+        
+    conn.close()
+    return projects
 
 # =====================================================================
 # 頁面路由
@@ -394,25 +622,60 @@ def check_admin():
 # 2. 獲取首頁初始化資料（棟別、樓層、工項及進度表）
 @app.route('/api/init_data', methods=['GET'])
 def get_init_data():
+    user_id = request.args.get('userId')
+    project_id = request.args.get('projectId')
+    
+    if not user_id:
+        return jsonify({"error": "缺少使用者ID"}), 400
+        
+    # 1. 取得該使用者有權限存取的所有專案
+    allowed_projects = get_user_allowed_projects(user_id)
+    if not allowed_projects:
+        return jsonify({
+            "error": "您尚未被分配到任何建案，請聯絡管理員。",
+            "blocks": [],
+            "floors": [],
+            "work_items": [],
+            "progress": {},
+            "allowed_projects": [],
+            "current_project_id": None
+        }), 200
+        
+    # 2. 決定當前載入的專案
+    current_project_id = None
+    if project_id:
+        # 如果前端指定了專案，驗證是否有權限
+        if is_user_allowed_project(user_id, int(project_id)):
+            current_project_id = int(project_id)
+            
+    if not current_project_id:
+        # 預設為該使用者被授權的第一個專案
+        current_project_id = allowed_projects[0]["id"]
+        
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 取得棟別
-    blocks_rows = cursor.execute("SELECT id, name FROM blocks ORDER BY id").fetchall()
+    # 取得當前專案的棟別
+    blocks_rows = cursor.execute("SELECT id, name FROM blocks WHERE project_id = ? ORDER BY id", (current_project_id,)).fetchall()
     blocks = [{"id": r["id"], "name": r["name"]} for r in blocks_rows]
     
-    # 取得樓層
-    floors_rows = cursor.execute("SELECT id, name FROM floors ORDER BY id").fetchall()
+    # 取得當前專案的樓層
+    floors_rows = cursor.execute("SELECT id, name FROM floors WHERE project_id = ? ORDER BY id", (current_project_id,)).fetchall()
     floors = [{"id": r["id"], "name": r["name"]} for r in floors_rows]
     
-    # 取得工項 (變更為 ORDER BY id，以遵循資料庫寫入順序，確保結構置頂與正確排序)
-    work_items_rows = cursor.execute("SELECT id, category, name FROM work_items ORDER BY id").fetchall()
+    # 取得當前專案的工項
+    work_items_rows = cursor.execute("SELECT id, category, name FROM work_items WHERE project_id = ? ORDER BY id", (current_project_id,)).fetchall()
     work_items = [{"id": r["id"], "category": r["category"], "name": r["name"]} for r in work_items_rows]
     
-    # 取得所有進度
-    progress_rows = cursor.execute("SELECT block_id, floor_id, work_item_id, status, updated_by, updated_at FROM progress").fetchall()
+    # 取得當前專案下所有進度 (當 progress 的 block_id 關聯到屬於此專案的 blocks)
+    progress_rows = cursor.execute('''
+        SELECT p.block_id, p.floor_id, p.work_item_id, p.status, p.updated_by, p.updated_at 
+        FROM progress p
+        JOIN blocks b ON p.block_id = b.id
+        WHERE b.project_id = ?
+    ''', (current_project_id,)).fetchall()
     
-    # 格式化進度資料為字典，便於前端以 "block_id_floor_id_work_item_id" 鍵值快速查找
+    # 格式化進度資料為字典
     progress_map = {}
     for r in progress_rows:
         key = f"{r['block_id']}_{r['floor_id']}_{r['work_item_id']}"
@@ -428,7 +691,9 @@ def get_init_data():
         "blocks": blocks,
         "floors": floors,
         "work_items": work_items,
-        "progress": progress_map
+        "progress": progress_map,
+        "allowed_projects": allowed_projects,
+        "current_project_id": current_project_id
     })
 
 # 3. 切換儲存格狀態 (0 <-> 1)
@@ -447,9 +712,20 @@ def toggle_progress():
     if not all([block_id, floor_id, work_item_id, user_id]):
         return jsonify({"error": "參數不完整"}), 400
         
+    # 驗證使用者對該 block 所屬專案是否有權限
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+    cursor.execute("SELECT project_id FROM blocks WHERE id = ?", (block_id,))
+    block_row = cursor.fetchone()
+    if not block_row:
+        conn.close()
+        return jsonify({"error": "該棟別不存在"}), 400
+        
+    project_id = block_row[0]
+    if not is_user_allowed_project(user_id, project_id):
+        conn.close()
+        return jsonify({"error": "您沒有此建案的登記權限"}), 403
+        
     # 查詢現有狀態
     cursor.execute('''
         SELECT status FROM progress 
@@ -468,7 +744,7 @@ def toggle_progress():
         new_status = 1
     else:
         # 原本有資料，切換狀態 (1 -> 0, 0 -> 1)
-        new_status = 0 if row['status'] == 1 else 1
+        new_status = 0 if row[0] == 1 else 1
         cursor.execute('''
             UPDATE progress 
             SET status = ?, updated_by = ?, updated_at = ?
@@ -499,20 +775,87 @@ def get_admin_config():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    blocks = [{"id": r["id"], "name": r["name"]} for r in cursor.execute("SELECT id, name FROM blocks ORDER BY id").fetchall()]
-    floors = [{"id": r["id"], "name": r["name"]} for r in cursor.execute("SELECT id, name FROM floors ORDER BY id").fetchall()]
-    work_items = [{"id": r["id"], "category": r["category"], "name": r["name"]} for r in cursor.execute("SELECT id, category, name FROM work_items ORDER BY id").fetchall()]
+    # 獲取專案清單
+    projects = [{"id": r[0], "name": r[1]} for r in cursor.execute("SELECT id, name FROM projects ORDER BY id").fetchall()]
+    
+    # 獲取各專案底下的棟別、樓層、工項
+    blocks = [{"id": r["id"], "project_id": r["project_id"], "name": r["name"]} for r in cursor.execute("SELECT id, project_id, name FROM blocks ORDER BY id").fetchall()]
+    floors = [{"id": r["id"], "project_id": r["project_id"], "name": r["name"]} for r in cursor.execute("SELECT id, project_id, name FROM floors ORDER BY id").fetchall()]
+    work_items = [{"id": r["id"], "project_id": r["project_id"], "category": r["category"], "name": r["name"]} for r in cursor.execute("SELECT id, project_id, category, name FROM work_items ORDER BY id").fetchall()]
     admins = [{"id": r["id"], "line_user_id": r["line_user_id"]} for r in cursor.execute("SELECT id, line_user_id FROM admins ORDER BY id").fetchall()]
-    allowed_users = [{"id": r["id"], "line_user_id": r["line_user_id"], "name": r["name"]} for r in cursor.execute("SELECT id, line_user_id, name FROM allowed_users ORDER BY id").fetchall()]
+    
+    # 獲取所有工程師對應的開放專案關聯
+    cursor.execute("SELECT allowed_user_id, project_id FROM project_permissions")
+    perms = cursor.fetchall()
+    user_projects_map = {}
+    for user_id_val, proj_id in perms:
+        if user_id_val not in user_projects_map:
+            user_projects_map[user_id_val] = []
+        user_projects_map[user_id_val].append(proj_id)
+        
+    allowed_users = []
+    allowed_users_rows = cursor.execute("SELECT id, line_user_id, name FROM allowed_users ORDER BY id").fetchall()
+    for r in allowed_users_rows:
+        allowed_users.append({
+            "id": r["id"],
+            "line_user_id": r["line_user_id"],
+            "name": r["name"],
+            "project_ids": user_projects_map.get(r["id"], [])
+        })
     
     conn.close()
     return jsonify({
+        "projects": projects,
         "blocks": blocks,
         "floors": floors,
         "work_items": work_items,
         "admins": admins,
         "allowed_users": allowed_users
     })
+
+# 1-2. 新增建案
+@app.route('/api/admin/add_project', methods=['POST'])
+def add_project():
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not is_admin_user(user_id):
+        return jsonify({"error": "權限不足"}), 403
+        
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({"error": "建案名稱不能為空"}), 400
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO projects (name) VALUES (?)", (name,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except DBIntegrityError:
+        return jsonify({"error": "該建案名稱已存在"}), 400
+
+# 1-3. 刪除建案
+@app.route('/api/admin/delete_project', methods=['POST'])
+def delete_project():
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not is_admin_user(user_id):
+        return jsonify({"error": "權限不足"}), 403
+        
+    project_id = data.get('id')
+    if not project_id:
+        return jsonify({"error": "缺少建案 ID"}), 400
+        
+    if int(project_id) == 1:
+        return jsonify({"error": "預設建案為系統保留，無法刪除"}), 400
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"success": True})
 
 # 2. 新增棟別
 @app.route('/api/admin/add_block', methods=['POST'])
@@ -523,18 +866,20 @@ def add_block():
         return jsonify({"error": "權限不足"}), 403
         
     name = data.get('name', '').strip()
-    if not name:
-        return jsonify({"error": "棟別名稱不能為空"}), 400
+    project_id = data.get('projectId')
+    
+    if not name or not project_id:
+        return jsonify({"error": "棟別名稱與專案 ID 不能為空"}), 400
         
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO blocks (name) VALUES (?)", (name,))
+        cursor.execute("INSERT INTO blocks (project_id, name) VALUES (?, ?)", (project_id, name))
         conn.commit()
         conn.close()
         return jsonify({"success": True})
     except DBIntegrityError:
-        return jsonify({"error": "該棟別已存在"}), 400
+        return jsonify({"error": "該建案中已存在此棟別"}), 400
 
 # 3. 刪除棟別
 @app.route('/api/admin/delete_block', methods=['POST'])
@@ -564,18 +909,20 @@ def add_floor():
         return jsonify({"error": "權限不足"}), 403
         
     name = data.get('name', '').strip()
-    if not name:
-        return jsonify({"error": "樓層名稱不能為空"}), 400
+    project_id = data.get('projectId')
+    
+    if not name or not project_id:
+        return jsonify({"error": "樓層名稱與專案 ID 不能為空"}), 400
         
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO floors (name) VALUES (?)", (name,))
+        cursor.execute("INSERT INTO floors (project_id, name) VALUES (?, ?)", (project_id, name))
         conn.commit()
         conn.close()
         return jsonify({"success": True})
     except DBIntegrityError:
-        return jsonify({"error": "該樓層已存在"}), 400
+        return jsonify({"error": "該建案中已存在此樓層"}), 400
 
 # 5. 刪除樓層
 @app.route('/api/admin/delete_floor', methods=['POST'])
@@ -606,18 +953,20 @@ def add_work_item():
         
     category = data.get('category', '').strip()
     name = data.get('name', '').strip()
-    if not category or not name:
-        return jsonify({"error": "工種分類與工項名稱均不能為空"}), 400
+    project_id = data.get('projectId')
+    
+    if not category or not name or not project_id:
+        return jsonify({"error": "工種分類、工項名稱與專案 ID 均不能為空"}), 400
         
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO work_items (category, name) VALUES (?, ?)", (category, name))
+        cursor.execute("INSERT INTO work_items (project_id, category, name) VALUES (?, ?, ?)", (project_id, category, name))
         conn.commit()
         conn.close()
         return jsonify({"success": True})
     except DBIntegrityError:
-        return jsonify({"error": "該工項已存在於此分類中"}), 400
+        return jsonify({"error": "該建案此分類中已存在此工項"}), 400
 
 # 7. 刪除工項
 @app.route('/api/admin/delete_work_item', methods=['POST'])
@@ -686,7 +1035,7 @@ def delete_admin():
     conn.close()
     return jsonify({"success": True})
 
-# 10. 新增授權工程師 (白名單)
+# 10. 新增/修改 授權工程師 (白名單)
 @app.route('/api/admin/add_allowed_user', methods=['POST'])
 def add_allowed_user():
     data = request.get_json()
@@ -696,18 +1045,41 @@ def add_allowed_user():
         
     line_user_id = data.get('line_user_id', '').strip()
     name = data.get('name', '').strip()
+    project_ids = data.get('project_ids', [])
+    
     if not line_user_id or not name:
         return jsonify({"error": "LINE User ID 與工程師姓名均不能為空"}), 400
         
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO allowed_users (line_user_id, name) VALUES (?, ?)", (line_user_id, name))
+        # 1. 檢查是否已存在該使用者
+        cursor.execute("SELECT id FROM allowed_users WHERE line_user_id = ?", (line_user_id,))
+        user_row = cursor.fetchone()
+        
+        if user_row:
+            allowed_user_id = user_row[0]
+            cursor.execute("UPDATE allowed_users SET name = ? WHERE id = ?", (name, allowed_user_id))
+        else:
+            cursor.execute("INSERT INTO allowed_users (line_user_id, name) VALUES (?, ?)", (line_user_id, name))
+            if DATABASE_URL:
+                cursor.execute("SELECT LASTVAL()")
+                allowed_user_id = cursor.fetchone()[0]
+            else:
+                allowed_user_id = cursor.lastrowid
+                
+        # 2. 更新專案權限
+        cursor.execute("DELETE FROM project_permissions WHERE allowed_user_id = ?", (allowed_user_id,))
+        for p_id in project_ids:
+            cursor.execute("INSERT INTO project_permissions (allowed_user_id, project_id) VALUES (?, ?)", (allowed_user_id, p_id))
+            
         conn.commit()
         conn.close()
         return jsonify({"success": True})
-    except DBIntegrityError:
-        return jsonify({"error": "該 User ID 已在授權名單中"}), 400
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": f"資料庫寫入失敗: {str(e)}"}), 500
 
 # 11. 刪除授權工程師 (白名單)
 @app.route('/api/admin/delete_allowed_user', methods=['POST'])
