@@ -828,13 +828,16 @@ def toggle_progress():
             
             if info:
                 project_name, block_name, floor_name, category, item_name = info
+                liff_id = os.environ.get('LINE_LIFF_ID', '2010633327-s7bAAMPG')
+                liff_url = f"https://liff.line.me/{liff_id}"
                 msg = (
                     f"📢 [工地進度更新通知]\n"
                     f"🚧 建案：{project_name}\n"
                     f"📍 區域：{block_name} - {floor_name}\n"
                     f"🔨 工項：[{category}] {item_name} 已完工！\n"
                     f"👤 登記人：{user_name}\n"
-                    f"🕒 時間：{now_str}"
+                    f"🕒 時間：{now_str}\n\n"
+                    f"🔗 點此查看進度表：\n{liff_url}"
                 )
                 import threading
                 threading.Thread(target=send_line_notification, args=(msg,)).start()
