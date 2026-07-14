@@ -822,18 +822,180 @@ def add_project():
         return jsonify({"error": "權限不足"}), 403
         
     name = data.get('name', '').strip()
+    copy_from_project_id = data.get('copyFromProjectId')
+    
     if not name:
         return jsonify({"error": "建案名稱不能為空"}), 400
         
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        # 1. 插入新專案
         cursor.execute("INSERT INTO projects (name) VALUES (?)", (name,))
+        
+        # 2. 獲取新專案的 ID
+        if DATABASE_URL:
+            cursor.execute("SELECT LASTVAL()")
+            new_project_id = cursor.fetchone()[0]
+        else:
+            new_project_id = cursor.lastrowid
+            
+        # 3. 如果需要複製既有建案的配置
+        if copy_from_project_id:
+            copy_from_id = int(copy_from_project_id)
+            
+            # A. 複製「棟別」
+            cursor.execute("SELECT name FROM blocks WHERE project_id = ?", (copy_from_id,))
+            blocks_to_copy = cursor.fetchall()
+            for b in blocks_to_copy:
+                cursor.execute("INSERT INTO blocks (project_id, name) VALUES (?, ?)", (new_project_id, b[0]))
+                
+            # B. 複製「樓層」
+            cursor.execute("SELECT name FROM floors WHERE project_id = ?", (copy_from_id,))
+            floors_to_copy = cursor.fetchall()
+            for f in floors_to_copy:
+                cursor.execute("INSERT INTO floors (project_id, name) VALUES (?, ?)", (new_project_id, f[0]))
+                
+            # C. 複製「施工工項與分類」
+            cursor.execute("SELECT category, name FROM work_items WHERE project_id = ?", (copy_from_id,))
+            items_to_copy = cursor.fetchall()
+            for item in items_to_copy:
+                cursor.execute("INSERT INTO work_items (project_id, category, name) VALUES (?, ?, ?)", (new_project_id, item[0], item[1]))
+                
         conn.commit()
         conn.close()
         return jsonify({"success": True})
     except DBIntegrityError:
+        conn.close()
         return jsonify({"error": "該建案名稱已存在"}), 400
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": f"建立失敗: {str(e)}"}), 500
+
+# 1-4. 編輯建案名稱
+@app.route('/api/admin/edit_project', methods=['POST'])
+def edit_project():
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not is_admin_user(user_id):
+        return jsonify({"error": "權限不足"}), 403
+        
+    project_id = data.get('id')
+    name = data.get('name', '').strip()
+    
+    if not project_id or not name:
+        return jsonify({"error": "參數不完整"}), 400
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE projects SET name = ? WHERE id = ?", (name, project_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except DBIntegrityError:
+        return jsonify({"error": "建案名稱已存在"}), 400
+
+# 2-1. 編輯棟別名稱
+@app.route('/api/admin/edit_block', methods=['POST'])
+def edit_block():
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not is_admin_user(user_id):
+        return jsonify({"error": "權限不足"}), 403
+        
+    block_id = data.get('id')
+    name = data.get('name', '').strip()
+    
+    if not block_id or not name:
+        return jsonify({"error": "參數不完整"}), 400
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 取得當前棟別的專案 ID
+        cursor.execute("SELECT project_id FROM blocks WHERE id = ?", (block_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "找不到此棟別"}), 404
+        project_id = row[0]
+        
+        cursor.execute("UPDATE blocks SET name = ? WHERE id = ?", (name, block_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except DBIntegrityError:
+        return jsonify({"error": "該建案中已存在相同名稱的棟別"}), 400
+
+# 4-1. 編輯樓層名稱
+@app.route('/api/admin/edit_floor', methods=['POST'])
+def edit_floor():
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not is_admin_user(user_id):
+        return jsonify({"error": "權限不足"}), 403
+        
+    floor_id = data.get('id')
+    name = data.get('name', '').strip()
+    
+    if not floor_id or not name:
+        return jsonify({"error": "參數不完整"}), 400
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 取得當前樓層的專案 ID
+        cursor.execute("SELECT project_id FROM floors WHERE id = ?", (floor_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "找不到此樓層"}), 404
+        project_id = row[0]
+        
+        cursor.execute("UPDATE floors SET name = ? WHERE id = ?", (name, floor_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except DBIntegrityError:
+        return jsonify({"error": "該建案中已存在相同名稱的樓層"}), 400
+
+# 6-1. 編輯工項與分類名稱
+@app.route('/api/admin/edit_work_item', methods=['POST'])
+def edit_work_item():
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not is_admin_user(user_id):
+        return jsonify({"error": "權限不足"}), 403
+        
+    work_item_id = data.get('id')
+    category = data.get('category', '').strip()
+    name = data.get('name', '').strip()
+    
+    if not work_item_id or not category or not name:
+        return jsonify({"error": "參數不完整"}), 400
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 取得當前工項的專案 ID
+        cursor.execute("SELECT project_id FROM work_items WHERE id = ?", (work_item_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "找不到此工項"}), 404
+        project_id = row[0]
+        
+        cursor.execute("UPDATE work_items SET category = ?, name = ? WHERE id = ?", (category, name, work_item_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except DBIntegrityError:
+        return jsonify({"error": "該建案此分類中已存在相同名稱的工項"}), 400
 
 # 1-3. 刪除建案
 @app.route('/api/admin/delete_project', methods=['POST'])
