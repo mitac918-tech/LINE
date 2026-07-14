@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
@@ -733,7 +733,9 @@ def toggle_progress():
     ''', (block_id, floor_id, work_item_id))
     row = cursor.fetchone()
     
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 強制使用台灣時區 (UTC+8) 計算時間
+    tz_taiwan = timezone(timedelta(hours=8))
+    now_str = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M:%S")
     
     if row is None:
         # 原本無資料，直接設為已完成 (1)
