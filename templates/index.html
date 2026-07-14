@@ -491,8 +491,14 @@
                 </div>
             </div>
 
-            <!-- 棟別切換 -->
-            <div class="block-selector" style="display: flex; align-items: center; gap: 10px;">
+            <!-- 專案與棟別切換 -->
+            <div class="block-selector" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <div id="project-select-container" style="display: none; align-items: center; gap: 6px;">
+                    <label for="project-select" style="font-weight: 600; color: #a5b4fc;">當前建案：</label>
+                    <select id="project-select" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px; font-size: 0.9rem; outline: none; transition: border-color 0.3s; height: 42px;" onchange="onProjectChange()">
+                        <!-- 動態渲染建案 -->
+                    </select>
+                </div>
                 <label for="block-select">當前棟別：</label>
                 <select id="block-select">
                     <!-- 動態渲染棟別 -->
@@ -569,6 +575,7 @@
             displayName: '訪客工程師'
         };
         let isLiffContext = false;
+        let currentUserIsAdmin = false;
         
         // 全域快取資料
         let appData = {
@@ -784,8 +791,9 @@
                     fetch(`/api/is_admin?userId=${encodeURIComponent(currentUser.userId)}`)
                         .then(res => res.json())
                         .then(adminData => {
+                            currentUserIsAdmin = adminData.is_admin;
                             const adminBtn = document.getElementById("admin-btn");
-                            if (adminData.is_admin) {
+                            if (currentUserIsAdmin) {
                                 adminBtn.style.display = "flex";
                                 // 更新後台按鈕的網址，帶上身份標記
                                 adminBtn.href = `/admin?userId=${encodeURIComponent(currentUser.userId)}`;
@@ -809,11 +817,35 @@
         }
 
         // 載入表格所有資料
-        function loadDatabaseData() {
-            fetch('/api/init_data')
+        function loadDatabaseData(projectId = null) {
+            document.getElementById("loading").style.display = "flex";
+            
+            let url = `/api/init_data?userId=${encodeURIComponent(currentUser.userId)}`;
+            if (projectId) {
+                url += `&projectId=${encodeURIComponent(projectId)}`;
+            }
+            
+            fetch(url)
                 .then(res => res.json())
                 .then(data => {
+                    const lockScreen = document.getElementById("unauthorized-lock");
+                    
+                    if (data.error) {
+                        // 未分配建案的鎖定處理
+                        document.getElementById("lock-user-id").innerText = currentUser.userId;
+                        lockScreen.querySelector("div:nth-of-type(2)").innerText = "建案尚未開通";
+                        lockScreen.querySelector("div:nth-of-type(3)").innerText = data.error;
+                        lockScreen.style.display = "flex";
+                        document.getElementById("loading").style.display = "none";
+                        return;
+                    }
+                    
+                    // 確保鎖定畫面是隱藏的
+                    lockScreen.style.display = "none";
                     appData = data;
+                    
+                    // 填入專案下拉選單
+                    renderProjectSelector();
                     
                     // 填入棟別下拉選單
                     renderBlockSelector();
@@ -828,6 +860,45 @@
                     document.getElementById("loading").style.display = "none";
                     alert('資料加載失敗，請檢查後端服務是否啟動。');
                 });
+        }
+
+        function renderProjectSelector() {
+            const container = document.getElementById("project-select-container");
+            const select = document.getElementById("project-select");
+            
+            select.innerHTML = "";
+            const projects = appData.allowed_projects || [];
+            
+            if (projects.length === 0) {
+                container.style.display = "none";
+                return;
+            }
+            
+            projects.forEach(p => {
+                const opt = document.createElement("option");
+                opt.value = p.id;
+                opt.text = p.name;
+                select.add(opt);
+            });
+            
+            if (appData.current_project_id) {
+                select.value = appData.current_project_id;
+            }
+            
+            // 只有管理員或被分配多於一個專案的一般工程師才顯示下拉選單
+            if (currentUserIsAdmin || projects.length > 1) {
+                container.style.display = "flex";
+            } else {
+                container.style.display = "none";
+            }
+        }
+
+        function onProjectChange() {
+            const select = document.getElementById("project-select");
+            const projectId = select.value;
+            if (projectId) {
+                loadDatabaseData(projectId);
+            }
         }
 
         // =====================================================================
@@ -1061,6 +1132,13 @@
             const blockName = blockSelect.options[blockSelect.selectedIndex].text;
             const currentBlockId = blockSelect.value;
             
+            // 讀取當前選擇的專案名稱並加入檔名中
+            const projectSelect = document.getElementById("project-select");
+            let projectNamePrefix = "";
+            if (projectSelect && projectSelect.options.length > 0 && projectSelect.selectedIndex >= 0) {
+                projectNamePrefix = projectSelect.options[projectSelect.selectedIndex].text + "_";
+            }
+            
             // 1. 取得樓層並排序
             const sortedFloors = sortFloors([...appData.floors]);
             
@@ -1124,7 +1202,7 @@
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            link.setAttribute("download", `${blockName}_施工進度報表.csv`);
+            link.setAttribute("download", `${projectNamePrefix}${blockName}_施工進度報表.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
